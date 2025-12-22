@@ -1,245 +1,259 @@
 #pragma once
 
 #include <cassert>
-#include <string>
-#include <string_view>
+#include <format>
+#include <type_traits>
 #include <utility>
 #include "types.h"
 
-namespace stl {
+namespace sap::stl {
 
+    // Tag types for disambiguation
     struct success_tag_t {
-        explicit constexpr success_tag_t() noexcept = default;
+        explicit success_tag_t() = default;
     };
     struct error_tag_t {
-        explicit constexpr error_tag_t() noexcept = default;
+        explicit error_tag_t() = default;
     };
 
-    constexpr success_tag_t success{};
-    constexpr error_tag_t error{};
+    inline constexpr success_tag_t success{};
+    inline constexpr error_tag_t error{};
 
+    // Result type for error handling
     template <typename T = u32, typename Et = std::string>
     class result {
     public:
         using value_type = T;
         using error_type = Et;
 
-    private:
-        bool _is_ok{false};
-        union storage_union {
-            value_type value;
-            error_type error;
-            constexpr storage_union() noexcept {} // pass in values yourself
-            ~storage_union() noexcept {} // no-op, destroy explicitly
-        } _storage;
-        value_type* value_ptr() noexcept { return &_storage.value; }
-        const value_type* value_ptr() const noexcept { return &_storage.value; }
-        error_type* error_ptr() noexcept { return &_storage.error; }
-        const error_type* error_ptr() const noexcept { return &_storage.error; }
-        void destroy_active() noexcept {
-            if (_is_ok) {
-                if constexpr (!std::is_trivially_destructible_v<value_type>)
-                    value_ptr()->~value_type();
-            } else {
-                if constexpr (!std::is_trivially_destructible_v<error_type>)
-                    error_ptr()->~error_type();
-            }
+        // Default constructor - constructs with default value (if T is default constructible)
+        result()
+            requires std::is_default_constructible_v<T>
+            : m_HasValue(true) {
+            new (&m_Value) T();
         }
 
-    public:
-        template <typename U = value_type, typename = std::enable_if_t<std::is_default_constructible_v<U>>>
-        explicit result() noexcept(std::is_nothrow_default_constructible_v<value_type>) : _is_ok(true) {
-            ::new (value_ptr()) value_type();
-        }
-
+        // Success constructor
         template <typename... Args>
-        explicit result(success_tag_t, Args&&... args) noexcept(std::is_nothrow_constructible_v<value_type, Args...>) : _is_ok(true) {
-            ::new (value_ptr()) value_type(std::forward<Args>(args)...);
+        result(success_tag_t, Args&&... args) : m_HasValue(true) {
+            new (&m_Value) T(std::forward<Args>(args)...);
         }
 
+        // Error constructor
         template <typename... Args>
-        explicit result(error_tag_t, Args&&... args) noexcept(std::is_nothrow_constructible_v<error_type, Args...>) : _is_ok(false) {
-            ::new (error_ptr()) error_type(std::forward<Args>(args)...);
+        result(error_tag_t, Args&&... args) : m_HasValue(false) {
+            new (&m_Error) Et(std::forward<Args>(args)...);
         }
 
-        template <typename TT = value_type, typename EE = error_type,
-                  typename = std::enable_if_t<std::is_copy_constructible_v<TT> && std::is_copy_constructible_v<EE>>>
-        result(const result& other) noexcept(std::is_nothrow_copy_constructible_v<value_type> &&
-                                             std::is_nothrow_copy_constructible_v<error_type>) : _is_ok(other._is_ok) {
-            if (other._is_ok) {
-                ::new (value_ptr()) value_type(*other.value_ptr());
+        // Copy constructor
+        result(const result& other)
+            requires(std::is_copy_constructible_v<T> && std::is_copy_constructible_v<Et>)
+            : m_HasValue(other.m_HasValue) {
+            if (m_HasValue) {
+                new (&m_Value) T(other.m_Value);
             } else {
-                ::new (error_ptr()) error_type(*other.error_ptr());
+                new (&m_Error) Et(other.m_Error);
             }
         }
 
-        template <typename TT = value_type, typename EE = error_type,
-                  typename = std::enable_if_t<std::is_move_constructible_v<TT> && std::is_move_constructible_v<EE>>>
-        result(result&& other) noexcept(std::is_nothrow_move_constructible_v<value_type> &&
-                                        std::is_nothrow_move_constructible_v<error_type>) : _is_ok(other._is_ok) {
-            if (other._is_ok) {
-                ::new (value_ptr()) value_type(std::move(*other.value_ptr()));
+        // Move constructor
+        result(result&& other) noexcept(std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_constructible_v<Et>)
+            requires(std::is_move_constructible_v<T> && std::is_move_constructible_v<Et>)
+            : m_HasValue(other.m_HasValue) {
+            if (m_HasValue) {
+                new (&m_Value) T(std::move(other.m_Value));
             } else {
-                ::new (error_ptr()) error_type(std::move(*other.error_ptr()));
+                new (&m_Error) Et(std::move(other.m_Error));
             }
         }
 
-        ~result() noexcept { destroy_active(); }
-
-        // implicit conversions
-        result(const value_type& v) noexcept(std::is_nothrow_copy_constructible_v<value_type>) : _is_ok(true) {
-            ::new (value_ptr()) value_type(v);
-        }
-        result(value_type&& v) noexcept(std::is_nothrow_move_constructible_v<value_type>) : _is_ok(true) {
-            ::new (value_ptr()) value_type(std::move(v));
+        // Implicit conversion from value
+        result(const T& value)
+            requires std::is_copy_constructible_v<T>
+            : m_HasValue(true) {
+            new (&m_Value) T(value);
         }
 
-        template <typename TT = T, typename EE = error_type,
-                  typename = std::enable_if_t<std::is_copy_constructible_v<TT> && std::is_copy_constructible_v<EE>>>
-        result& operator=(const result& other) noexcept(std::is_nothrow_copy_constructible_v<value_type> &&
-                                                        std::is_nothrow_copy_constructible_v<error_type>) {
+        result(T&& value)
+            requires std::is_move_constructible_v<T>
+            : m_HasValue(true) {
+            new (&m_Value) T(std::move(value));
+        }
+
+        // Destructor
+        ~result() {
+            if (m_HasValue) {
+                m_Value.~T();
+            } else {
+                m_Error.~Et();
+            }
+        }
+
+        // Copy assignment
+        result& operator=(const result& other)
+            requires(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T> && std::is_copy_constructible_v<Et> &&
+                     std::is_copy_assignable_v<Et>)
+        {
             if (this == &other)
                 return *this;
 
-            // If the active variant is the same, assign into it if assignable;
-            // otherwise reconstruct.
-            if (_is_ok && other._is_ok) {
-                if constexpr (std::is_copy_assignable_v<value_type>) {
-                    *value_ptr() = *other.value_ptr();
-                } else {
-                    // reconstruct
-                    destroy_active();
-                    ::new (value_ptr()) T(*other.value_ptr());
-                }
-            } else if (!_is_ok && !other._is_ok) {
-                if constexpr (std::is_copy_assignable_v<error_type>) {
-                    *error_ptr() = *other.error_ptr();
-                } else {
-                    destroy_active();
-                    ::new (error_ptr()) error_type(*other.error_ptr());
-                }
+            if (m_HasValue && other.m_HasValue) {
+                m_Value = other.m_Value;
+            } else if (!m_HasValue && !other.m_HasValue) {
+                m_Error = other.m_Error;
             } else {
-                // different active variant -> destroy current and copy-construct other's
-                // active member
-                destroy_active();
-                _is_ok = other._is_ok;
-                if (_is_ok)
-                    ::new (value_ptr()) T(*other.value_ptr());
-                else
-                    ::new (error_ptr()) error_type(*other.error_ptr());
+                // State change
+                if (m_HasValue) {
+                    m_Value.~T();
+                } else {
+                    m_Error.~Et();
+                }
+                m_HasValue = other.m_HasValue;
+                if (m_HasValue) {
+                    new (&m_Value) T(other.m_Value);
+                } else {
+                    new (&m_Error) Et(other.m_Error);
+                }
             }
             return *this;
         }
 
-        template <typename TT = T, typename EE = error_type,
-                  typename = std::enable_if_t<std::is_move_constructible_v<TT> && std::is_move_constructible_v<EE>>>
-        result& operator=(result&& other) noexcept(std::is_nothrow_move_constructible_v<value_type> &&
-                                                   std::is_nothrow_move_constructible_v<error_type>) {
+        // Move assignment
+        result& operator=(result&& other) noexcept(std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T> &&
+                                                   std::is_nothrow_move_constructible_v<Et> && std::is_nothrow_move_assignable_v<Et>)
+            requires(std::is_move_constructible_v<T> && std::is_move_assignable_v<T> && std::is_move_constructible_v<Et> &&
+                     std::is_move_assignable_v<Et>)
+        {
             if (this == &other)
                 return *this;
 
-            if (_is_ok && other._is_ok) {
-                if constexpr (std::is_move_assignable_v<value_type>) {
-                    *value_ptr() = std::move(*other.value_ptr());
-                } else {
-                    destroy_active();
-                    ::new (value_ptr()) T(std::move(*other.value_ptr()));
-                }
-            } else if (!_is_ok && !other._is_ok) {
-                if constexpr (std::is_move_assignable_v<error_type>) {
-                    *error_ptr() = std::move(*other.error_ptr());
-                } else {
-                    destroy_active();
-                    ::new (error_ptr()) error_type(std::move(*other.error_ptr()));
-                }
+            if (m_HasValue && other.m_HasValue) {
+                m_Value = std::move(other.m_Value);
+            } else if (!m_HasValue && !other.m_HasValue) {
+                m_Error = std::move(other.m_Error);
             } else {
-                destroy_active();
-                _is_ok = other._is_ok;
-                if (_is_ok)
-                    ::new (value_ptr()) T(std::move(*other.value_ptr()));
-                else
-                    ::new (error_ptr()) error_type(std::move(*other.error_ptr()));
+                // State change
+                if (m_HasValue) {
+                    m_Value.~T();
+                } else {
+                    m_Error.~Et();
+                }
+                m_HasValue = other.m_HasValue;
+                if (m_HasValue) {
+                    new (&m_Value) T(std::move(other.m_Value));
+                } else {
+                    new (&m_Error) Et(std::move(other.m_Error));
+                }
             }
             return *this;
         }
 
-        bool has_value() const noexcept { return _is_ok; }
-        bool has_error() const noexcept { return !_is_ok; }
-        explicit operator bool() const noexcept { return _is_ok; }
-        T& value() & {
-            assert(_is_ok && "accessing value when result holds error");
-            return *value_ptr();
-        }
-        const T& value() const& {
-            assert(_is_ok && "accessing value when result holds error");
-            return *value_ptr();
-        }
-        T&& value() && {
-            assert(_is_ok && "accessing value when result holds error");
-            return std::move(*value_ptr());
+        // State checking
+        [[nodiscard]] bool has_value() const noexcept { return m_HasValue; }
+        [[nodiscard]] bool has_error() const noexcept { return !m_HasValue; }
+        [[nodiscard]] explicit operator bool() const noexcept { return m_HasValue; }
+
+        // Value access
+        [[nodiscard]] T& value() & {
+            assert(m_HasValue && "Attempting to access value of failed result");
+            return m_Value;
         }
 
-        error_type& error() & {
-            assert(!_is_ok && "accessing error when result holds value");
-            return *error_ptr();
-        }
-        const error_type& error() const& {
-            assert(!_is_ok && "accessing error when result holds value");
-            return *error_ptr();
-        }
-        error_type&& error() && {
-            assert(!_is_ok && "accessing error when result holds value");
-            return std::move(*error_ptr());
+        [[nodiscard]] const T& value() const& {
+            assert(m_HasValue && "Attempting to access value of failed result");
+            return m_Value;
         }
 
-        value_type* operator->() {
-            assert(_is_ok);
-            return value_ptr();
+        [[nodiscard]] T&& value() && {
+            assert(m_HasValue && "Attempting to access value of failed result");
+            return std::move(m_Value);
         }
-        const value_type* operator->() const {
-            assert(_is_ok);
-            return value_ptr();
-        }
-        value_type& operator*() & { return value(); }
-        const value_type& operator*() const& { return value(); }
 
+        // Error access
+        [[nodiscard]] Et& error() & {
+            assert(!m_HasValue && "Attempting to access error of successful result");
+            return m_Error;
+        }
+
+        [[nodiscard]] const Et& error() const& {
+            assert(!m_HasValue && "Attempting to access error of successful result");
+            return m_Error;
+        }
+
+        [[nodiscard]] Et&& error() && {
+            assert(!m_HasValue && "Attempting to access error of successful result");
+            return std::move(m_Error);
+        }
+
+        // Pointer-like access to value
+        [[nodiscard]] T* operator->() {
+            assert(m_HasValue && "Attempting to access value of failed result");
+            return &m_Value;
+        }
+
+        [[nodiscard]] const T* operator->() const {
+            assert(m_HasValue && "Attempting to access value of failed result");
+            return &m_Value;
+        }
+
+        [[nodiscard]] T& operator*() & {
+            assert(m_HasValue && "Attempting to access value of failed result");
+            return m_Value;
+        }
+
+        [[nodiscard]] const T& operator*() const& {
+            assert(m_HasValue && "Attempting to access value of failed result");
+            return m_Value;
+        }
+
+        // Emplace functions
         template <typename... Args>
         void emplace_value(Args&&... args) {
-            if (_is_ok) {
-                if constexpr (!std::is_trivially_destructible_v<value_type>)
-                    value_ptr()->~value_type();
-                ::new (value_ptr()) value_type(std::forward<Args>(args)...);
+            if (m_HasValue) {
+                m_Value.~T();
             } else {
-                if constexpr (!std::is_trivially_destructible_v<error_type>)
-                    error_ptr()->~error_type();
-                ::new (value_ptr()) value_type(std::forward<Args>(args)...);
-                _is_ok = true;
+                m_Error.~Et();
             }
+            m_HasValue = true;
+            new (&m_Value) T(std::forward<Args>(args)...);
         }
 
         template <typename... Args>
         void emplace_error(Args&&... args) {
-            if (!_is_ok) {
-                if constexpr (!std::is_trivially_destructible_v<error_type>)
-                    error_ptr()->~error_type();
-                ::new (error_ptr()) error_type(std::forward<Args>(args)...);
+            if (m_HasValue) {
+                m_Value.~T();
             } else {
-                if constexpr (!std::is_trivially_destructible_v<value_type>)
-                    value_ptr()->~value_type();
-                ::new (error_ptr()) error_type(std::forward<Args>(args)...);
-                _is_ok = false;
+                m_Error.~Et();
             }
+            m_HasValue = false;
+            new (&m_Error) Et(std::forward<Args>(args)...);
         }
+
+    private:
+        union {
+            T m_Value;
+            Et m_Error;
+        };
+        bool m_HasValue;
     };
 
+    // Helper function to create error result with std::string message
     template <typename T = u32>
-    [[nodiscard]] inline result<T> make_error(std::string_view msg) {
-        return result<T>(error, msg);
+    [[nodiscard]] inline result<T, std::string> make_error(const char* msg) {
+        return result<T, std::string>(error, msg);
     }
 
+    // Helper function to create error result with formatted message
+    template <typename T = u32, typename... Args>
+    [[nodiscard]] inline result<T, std::string> make_error(std::format_string<Args...> fmt, Args&&... args) {
+        auto formatted = std::format(fmt, std::forward<Args>(args)...);
+        return result<T, std::string>(error, formatted);
+    }
+
+    // Helper function to create successful result
     template <typename... Args>
     [[nodiscard]] inline result<> result_success(Args&&... args) {
-        return result<>(success, std::forward(args)...);
+        return result<>(success, std::forward<Args>(args)...);
     }
 
-} // namespace stl
+} // namespace sf::stl
