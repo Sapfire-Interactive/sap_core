@@ -1,5 +1,21 @@
 #pragma once
 
+#include <array>
+#include <bitset>
+#include <cstddef>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <mutex>
+#include <optional>
+#include <queue>
+#include <span>
+#include <sstream>
+#include <string_view>
+#include <thread>
+#include <tuple>
+#include <utility>
+
 #include <cstdint>
 
 using u8 = std::uint8_t;
@@ -14,3 +30,58 @@ using i64 = std::int64_t;
 
 using f32 = float;
 using f64 = double;
+
+namespace stl {
+
+    // Non-allocating STL type aliases
+    template <class... Ts>
+    using tuple = std::tuple<Ts...>;
+
+    template <class T>
+    using reference_wrapper = std::reference_wrapper<T>;
+
+    template <typename T, class Container = std::deque<T>>
+    using queue = std::queue<T, Container>;
+
+    template <typename T>
+    using function = std::function<T>;
+
+    using string_view = std::string_view;
+    using wstring_view = std::wstring_view;
+
+    using mutex = std::mutex;
+    using recursive_mutex = std::recursive_mutex;
+
+    template <typename Mutex>
+    using lock_guard = std::lock_guard<Mutex>;
+
+    template <typename Mutex>
+    using unique_lock = std::unique_lock<Mutex>;
+
+    template <typename Mutex>
+    using scoped_lock = std::scoped_lock<Mutex>;
+
+    using thread = std::thread;
+    using jthread = std::jthread;
+
+    template <typename T>
+    using optional = std::optional<T>;
+
+    template <typename T, std::size_t Extent = std::dynamic_extent>
+    using span = std::span<T, Extent>;
+
+    template <class T, size_t N>
+    using array = std::array<T, N>;
+
+    template <size_t N>
+    using bitset = std::bitset<N>;
+
+    // Memory size helpers
+    constexpr inline u64 gibibytes(u32 amount) { return static_cast<u64>(amount) * 1024ULL * 1024ULL * 1024ULL; }
+    constexpr inline u64 mebibytes(u32 amount) { return static_cast<u64>(amount) * 1024ULL * 1024ULL; }
+    constexpr inline u64 kibibytes(u32 amount) { return static_cast<u64>(amount) * 1024ULL; }
+    constexpr inline u64 gigabytes(u32 amount) { return static_cast<u64>(amount) * 1000ULL * 1000ULL * 1000ULL; }
+    constexpr inline u64 megabytes(u32 amount) { return static_cast<u64>(amount) * 1000ULL * 1000ULL; }
+    constexpr inline u64 kilobytes(u32 amount) { return static_cast<u64>(amount) * 1000ULL; }
+
+} // namespace stl
