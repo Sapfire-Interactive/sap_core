@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <new>
 #include <type_traits>
-#include "stl/arena.h"
+#include "sap_core/stl/arena.h"
 
 namespace stl {
 

@@ -7,7 +7,7 @@
 #include <ostream>
 #include <string>
 #include <string_view>
-#include "stl/stack_allocator.h"
+#include "sap_core/stl/stack_allocator.h"
 
 namespace stl {
 
