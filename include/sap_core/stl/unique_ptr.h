@@ -2,7 +2,7 @@
 
 #include <cassert>
 #include <memory>
-#include "stl/arena.h"
+#include "sap_core/stl/arena.h"
 
 namespace stl {
 
