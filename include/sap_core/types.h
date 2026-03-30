@@ -76,6 +76,8 @@ namespace stl {
     template <size_t N>
     using bitset = std::bitset<N>;
 
+    using byte = std::byte;
+
     // Memory size helpers
     constexpr inline u64 gibibytes(u32 amount) { return static_cast<u64>(amount) * 1024ULL * 1024ULL * 1024ULL; }
     constexpr inline u64 mebibytes(u32 amount) { return static_cast<u64>(amount) * 1024ULL * 1024ULL; }
