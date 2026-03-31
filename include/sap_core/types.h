@@ -78,6 +78,11 @@ namespace stl {
 
     using byte = std::byte;
 
+    template<typename T>
+    using atomic = std::atomic<T>;
+
+    using size_t = std::size_t;
+
     // Memory size helpers
     constexpr inline u64 gibibytes(u32 amount) { return static_cast<u64>(amount) * 1024ULL * 1024ULL * 1024ULL; }
     constexpr inline u64 mebibytes(u32 amount) { return static_cast<u64>(amount) * 1024ULL * 1024ULL; }
