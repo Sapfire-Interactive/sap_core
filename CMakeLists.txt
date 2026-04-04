@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS True)
 
 option(SAP_CORE_BUILD_SHARED "Build shared library" ON)
 option(SAP_CORE_BUILD_STATIC "Build static library" ON)
+option(SAP_CORE_BUILD_TESTS "Build tests" ON)
 
 set(SAP_CORE_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/sap_core/types.h
@@ -64,6 +65,48 @@ if(SAP_CORE_BUILD_SHARED)
     add_library(sap::core ALIAS sap_core_shared)
 elseif(SAP_CORE_BUILD_STATIC)
     add_library(sap::core ALIAS sap_core_static)
+endif()
+
+# Tests
+if(SAP_CORE_BUILD_TESTS)
+    enable_testing()
+
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.14.0
+    )
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+
+    add_executable(sap_core_tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/arena_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/allocator_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/stack_allocator_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/result_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixed_string_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/spsc_queue_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/generational_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/container_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/smart_ptr_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/serialization_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/job_system_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/types_tests.cpp
+    )
+
+    if(SAP_CORE_BUILD_STATIC)
+        target_link_libraries(sap_core_tests PRIVATE sap_core_static)
+    else()
+        target_link_libraries(sap_core_tests PRIVATE sap_core_shared)
+    endif()
+
+    target_link_libraries(sap_core_tests PRIVATE
+        GTest::gtest_main
+    )
+
+    include(GoogleTest)
+    gtest_discover_tests(sap_core_tests)
 endif()
 
 # Installation
