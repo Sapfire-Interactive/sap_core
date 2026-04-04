@@ -15,6 +15,7 @@ set(SAP_CORE_HEADERS
 )
 
 set(SAP_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/job_system.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/serialization.cpp)
 
 # Shared library

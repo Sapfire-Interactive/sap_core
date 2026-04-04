@@ -2,6 +2,8 @@
 
 #include "sap_core/types.h"
 
+#include <utility>
+
 namespace stl {
     template <typename T, stl::size_t Capacity = 65536>
     class spsc_queue {
@@ -11,10 +13,19 @@ namespace stl {
         bool try_push(const T& item) {
             const stl::size_t head = m_head.load(std::memory_order_relaxed);
             const stl::size_t next = (head + 1) & (Capacity - 1);
-            // full?
             if (next == m_tail.load(std::memory_order_acquire))
                 return false;
             m_buffer[head] = item;
+            m_head.store(next, std::memory_order_release);
+            return true;
+        }
+
+        bool try_push(T&& item) {
+            const stl::size_t head = m_head.load(std::memory_order_relaxed);
+            const stl::size_t next = (head + 1) & (Capacity - 1);
+            if (next == m_tail.load(std::memory_order_acquire))
+                return false;
+            m_buffer[head] = std::move(item);
             m_head.store(next, std::memory_order_release);
             return true;
         }

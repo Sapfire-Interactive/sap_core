@@ -2,6 +2,7 @@
 
 #include <array>
 #include <bitset>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -60,6 +61,8 @@ namespace stl {
 
     template <typename Mutex>
     using scoped_lock = std::scoped_lock<Mutex>;
+
+    using condition_variable = std::condition_variable;
 
     using thread = std::thread;
     using jthread = std::jthread;
