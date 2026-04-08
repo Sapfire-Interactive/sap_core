@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.15)
 project(sap_core VERSION 1.0.0 LANGUAGES CXX)
 
+# Guard against being added more than once via nested submodules.
+# Consumers can safely call add_subdirectory(sap_core) unconditionally —
+# the second and subsequent invocations become no-ops.
+if(TARGET sap::core)
+    return()
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
