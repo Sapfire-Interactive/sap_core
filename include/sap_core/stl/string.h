@@ -96,6 +96,13 @@ namespace stl {
 } // namespace stl
 
 template <class Allocator>
+struct std::hash<stl::basic_string<Allocator>> {
+    std::size_t operator()(const stl::basic_string<Allocator>& s) const noexcept {
+        return std::hash<std::string_view>{}(std::string_view(s));
+    }
+};
+
+template <class Allocator>
 struct std::formatter<stl::basic_string<Allocator>> : std::formatter<std::string_view> {
     auto format(const stl::basic_string<Allocator>& s, std::format_context& ctx) const {
         return std::formatter<std::string_view>::format(std::string_view(s), ctx);
