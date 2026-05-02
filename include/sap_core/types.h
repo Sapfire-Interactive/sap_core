@@ -81,7 +81,17 @@ namespace stl {
 
     using byte = std::byte;
 
-    template<typename T>
+    template <class T, std::size_t Extent>
+    constexpr auto as_bytes(std::span<T, Extent> s) noexcept {
+        return std::as_bytes(s);
+    }
+
+    template <class T, std::size_t Extent>
+    constexpr auto as_writable_bytes(std::span<T, Extent> s) noexcept {
+        return std::as_writable_bytes(s);
+    }
+
+    template <typename T>
     using atomic = std::atomic<T>;
 
     using size_t = std::size_t;
