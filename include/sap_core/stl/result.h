@@ -228,4 +228,11 @@ namespace stl {
         return result<>(success, std::forward<Args>(args)...);
     }
 
+#define RESULT_CHECK(f)                                                                                                                    \
+    do {                                                                                                                                   \
+        auto _res = (f);                                                                                                                   \
+        if (!_res)                                                                                                                         \
+            return _res;                                                                                                                   \
+    } while (0)
+
 } // namespace stl
