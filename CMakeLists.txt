@@ -26,6 +26,7 @@ set(SAP_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/job_system.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/serialization.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/guid.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/timer.cpp
     $<$<PLATFORM_ID:Linux>:${CMAKE_CURRENT_SOURCE_DIR}/src/posix_clock.cpp>
 )
 
@@ -104,6 +105,7 @@ if(SAP_CORE_BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/job_system_tests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/types_tests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/clock_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/timer_tests.cpp
     )
 
     if(SAP_CORE_BUILD_STATIC)
