@@ -6,6 +6,16 @@
 #include <immintrin.h>
 #endif
 
+// Symbol visibility: dllexport when building the DLL, dllimport for its
+// consumers, no-op for the static lib / non-Windows.
+#if defined(SAP_CORE_STATIC_DEFINE) || !defined(_WIN32)
+#define SAP_CORE_API
+#elif defined(SAP_CORE_EXPORTS)
+#define SAP_CORE_API __declspec(dllexport)
+#else
+#define SAP_CORE_API __declspec(dllimport)
+#endif
+
 // a single-cycle "do nothing useful" hint to the CPU.
 // When spin-waiting (polling a queue in a tight loop), a raw empty loop
 // causes two problems:

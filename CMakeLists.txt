@@ -28,6 +28,7 @@ set(SAP_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/guid.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/timer.cpp
     $<$<PLATFORM_ID:Linux>:${CMAKE_CURRENT_SOURCE_DIR}/src/posix_clock.cpp>
+    $<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_SOURCE_DIR}/src/windows_clock.cpp>
 )
 
 # Shared library
@@ -44,6 +45,9 @@ if(SAP_CORE_BUILD_SHARED)
     if(WIN32)
         target_link_libraries(sap_core_shared PRIVATE ws2_32)
     endif()
+
+    # dllexport while building the DLL; consumers see dllimport.
+    target_compile_definitions(sap_core_shared PRIVATE SAP_CORE_EXPORTS)
 
     set_target_properties(sap_core_shared PROPERTIES
         OUTPUT_NAME sap_core
@@ -64,6 +68,9 @@ if(SAP_CORE_BUILD_STATIC)
     if(WIN32)
         target_link_libraries(sap_core_static PRIVATE ws2_32)
     endif()
+
+    # Static lib + its consumers: API macro is a no-op.
+    target_compile_definitions(sap_core_static PUBLIC SAP_CORE_STATIC_DEFINE)
 
     set_target_properties(sap_core_static PROPERTIES
         OUTPUT_NAME sap_core

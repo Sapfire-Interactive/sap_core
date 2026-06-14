@@ -1,11 +1,12 @@
 #pragma once
 
 #include "clock.h"
+#include "platform.h"
 #include "stl/result.h"
 #include "types.h"
 
 namespace sap::core {
-    class Timer {
+    class SAP_CORE_API Timer {
     public:
         enum class Mode {
             OneShot,

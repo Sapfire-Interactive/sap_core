@@ -1,12 +1,13 @@
 #pragma once
 
+#include "sap_core/platform.h"
 #include "sap_core/stl/result.h"
 #include "sap_core/stl/vector.h"
 #include "sap_core/stl/string.h"
 #include "types.h"
 
 namespace sap {
-    class ByteWriter {
+    class SAP_CORE_API ByteWriter {
     public:
         stl::result<> write_u8(u8 val);
         stl::result<> write_u16(u16 val);
@@ -25,7 +26,7 @@ namespace sap {
         stl::vector<stl::byte> m_buffer;
     };
 
-    class ByteReader {
+    class SAP_CORE_API ByteReader {
     public:
         explicit ByteReader(stl::span<const stl::byte> buffer);
         [[nodiscard]] stl::result<u8> read_u8();

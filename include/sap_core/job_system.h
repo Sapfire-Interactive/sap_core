@@ -1,5 +1,6 @@
 #pragma once
 
+#include "sap_core/platform.h"
 #include "sap_core/stl/spsc_queue.h"
 #include "sap_core/stl/unique_ptr.h"
 #include "sap_core/stl/vector.h"
@@ -11,7 +12,7 @@ namespace sap {
         u32 thread_count = stl::thread::hardware_concurrency();
     };
 
-    class job_system {
+    class SAP_CORE_API job_system {
     public:
         job_system(const job_system_config& config = {});
         ~job_system();

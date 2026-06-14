@@ -1,5 +1,6 @@
 #pragma once
 #include <concepts>
+#include <sap_core/platform.h>
 #include <sap_core/stl/result.h>
 #include <sap_core/types.h>
 
@@ -12,7 +13,7 @@ namespace sap::core {
 
     // Default: clock_gettime(CLOCK_MONOTONIC) on Linux,
     // QueryPerformanceCounter on Windows. See §8 for the Windows conversion.
-    class system_monotonic_clock {
+    class SAP_CORE_API system_monotonic_clock {
     public:
         system_monotonic_clock();
         stl::result<i64> now_ns() const;
