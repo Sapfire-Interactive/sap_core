@@ -21,17 +21,17 @@ namespace stl {
         explicit vector(const Allocator& alloc) : base_type(alloc) {}
 
         // Construct with count default-inserted elements
-        vector(typename base_type::size_type count, const Allocator& alloc) : base_type(count, alloc) {}
+        vector(typename base_type::size_type count, const Allocator& alloc = Allocator()) : base_type(count, alloc) {}
 
         // Construct with count copies of value
-        vector(typename base_type::size_type count, const T& value, const Allocator& alloc) : base_type(count, value, alloc) {}
+        vector(typename base_type::size_type count, const T& value, const Allocator& alloc = Allocator()) : base_type(count, value, alloc) {}
 
         // Construct from iterator range
         template <class InputIt>
-        vector(InputIt first, InputIt last, const Allocator& alloc) : base_type(first, last, alloc) {}
+        vector(InputIt first, InputIt last, const Allocator& alloc = Allocator()) : base_type(first, last, alloc) {}
 
         // Construct from initializer list
-        vector(std::initializer_list<T> init, const Allocator& alloc) : base_type(init, alloc) {}
+        vector(std::initializer_list<T> init, const Allocator& alloc = Allocator()) : base_type(init, alloc) {}
 
         vector(const vector& other) : base_type(other) {}
         vector(vector&& other) noexcept : base_type(std::move(other)) {}
