@@ -114,6 +114,7 @@ if(SAP_CORE_BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/types_tests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/clock_tests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/timer_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/task_tests.cpp
     )
 
     if(SAP_CORE_BUILD_STATIC)
