@@ -4,10 +4,10 @@
 #include "sap_core/stl/atomic.h"
 #include "sap_core/stl/bitset.h"
 #include "sap_core/stl/functional.h"
+#include "sap_core/stl/mutex.h"
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
-#include <mutex>
 #include <optional>
 #include <sstream>
 #include <thread>
@@ -36,18 +36,6 @@ using f32 = float;
 using f64 = double;
 
 namespace stl {
-
-    using mutex = std::mutex;
-    using recursive_mutex = std::recursive_mutex;
-
-    template <typename Mutex>
-    using lock_guard = std::lock_guard<Mutex>;
-
-    template <typename Mutex>
-    using unique_lock = std::unique_lock<Mutex>;
-
-    template <typename Mutex>
-    using scoped_lock = std::scoped_lock<Mutex>;
 
     using condition_variable = std::condition_variable;
 
