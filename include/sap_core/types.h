@@ -9,7 +9,6 @@
 #include <functional>
 #include <mutex>
 #include <optional>
-#include <span>
 #include <sstream>
 #include <thread>
 
@@ -17,6 +16,7 @@
 #include <utility>
 
 #include "sap_core/stl/queue.h"
+#include "sap_core/stl/span.h"
 
 #include "sap_core/stl/tuple.h"
 
@@ -74,20 +74,7 @@ namespace stl {
     template <typename T>
     using optional = std::optional<T>;
 
-    template <typename T, std::size_t Extent = std::dynamic_extent>
-    using span = std::span<T, Extent>;
-
     using byte = std::byte;
-
-    template <class T, std::size_t Extent>
-    constexpr auto as_bytes(std::span<T, Extent> s) noexcept {
-        return std::as_bytes(s);
-    }
-
-    template <class T, std::size_t Extent>
-    constexpr auto as_writable_bytes(std::span<T, Extent> s) noexcept {
-        return std::as_writable_bytes(s);
-    }
 
     using size_t = std::size_t;
 
