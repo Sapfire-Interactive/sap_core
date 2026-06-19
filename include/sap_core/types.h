@@ -6,9 +6,9 @@
 #include "sap_core/stl/condition_variable.h"
 #include "sap_core/stl/functional.h"
 #include "sap_core/stl/mutex.h"
+#include "sap_core/stl/optional.h"
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <sstream>
 
 #include "sap_core/stl/string_view.h"
@@ -36,9 +36,6 @@ using f32 = float;
 using f64 = double;
 
 namespace stl {
-
-    template <typename T>
-    using optional = std::optional<T>;
 
     using byte = std::byte;
 
