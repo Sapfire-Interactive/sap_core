@@ -1,7 +1,8 @@
 #pragma once
 
-#include <array>
 #include <bitset>
+
+#include "sap_core/stl/array.h"
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -80,9 +81,6 @@ namespace stl {
 
     template <typename T, std::size_t Extent = std::dynamic_extent>
     using span = std::span<T, Extent>;
-
-    template <class T, size_t N>
-    using array = std::array<T, N>;
 
     template <size_t N>
     using bitset = std::bitset<N>;
