@@ -14,8 +14,9 @@
 #include <sstream>
 #include <string_view>
 #include <thread>
-#include <tuple>
 #include <utility>
+
+#include "sap_core/stl/tuple.h"
 
 #include <cstdint>
 
@@ -33,10 +34,6 @@ using f32 = float;
 using f64 = double;
 
 namespace stl {
-
-    // Non-allocating STL type aliases
-    template <class... Ts>
-    using tuple = std::tuple<Ts...>;
 
     template <class T>
     using reference_wrapper = std::reference_wrapper<T>;
