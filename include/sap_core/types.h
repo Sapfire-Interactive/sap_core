@@ -6,16 +6,16 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <functional>
 #include <mutex>
 #include <optional>
-#include <queue>
 #include <span>
 #include <sstream>
 #include <string_view>
 #include <thread>
 #include <utility>
+
+#include "sap_core/stl/queue.h"
 
 #include "sap_core/stl/tuple.h"
 
@@ -38,9 +38,6 @@ namespace stl {
 
     template <class T>
     using reference_wrapper = std::reference_wrapper<T>;
-
-    template <typename T, class Container = std::deque<T>>
-    using queue = std::queue<T, Container>;
 
     template <typename T>
     using function = std::function<T>;
