@@ -48,7 +48,7 @@ if(SAP_CORE_BUILD_SHARED)
     endif()
 
     # dllexport while building the DLL; consumers see dllimport.
-    target_compile_definitions(sap_core_shared PRIVATE SAP_CORE_EXPORTS)
+    target_compile_definitions(sap_core_shared PRIVATE SAP_CORE_EXPORTS $<$<OR:$<CONFIG:Debug>,$<BOOL:${SAP_CORE_BUILD_TESTS}>>:SAP_CORE_ARENA_STATS>)
 
     set_target_properties(sap_core_shared PROPERTIES
         OUTPUT_NAME sap_core
@@ -71,7 +71,7 @@ if(SAP_CORE_BUILD_STATIC)
     endif()
 
     # Static lib + its consumers: API macro is a no-op.
-    target_compile_definitions(sap_core_static PUBLIC SAP_CORE_STATIC_DEFINE)
+    target_compile_definitions(sap_core_static PUBLIC SAP_CORE_STATIC_DEFINE $<$<OR:$<CONFIG:Debug>,$<BOOL:${SAP_CORE_BUILD_TESTS}>>:SAP_CORE_ARENA_STATS>)
 
     set_target_properties(sap_core_static PROPERTIES
         OUTPUT_NAME sap_core

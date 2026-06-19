@@ -18,17 +18,27 @@ namespace stl {
     // memory is reclaimed only when the arena is reset().
     class linear_arena {
     public:
-        linear_arena() : begin_(nullptr), cur_(nullptr), end_(nullptr), used_peak_(0), alloc_calls_(0) {}
+        linear_arena() : begin_(nullptr), cur_(nullptr), end_(nullptr)
+#ifdef SAP_CORE_ARENA_STATS
+                         , used_peak_(0), alloc_calls_(0)
+#endif
+                         {}
 
         linear_arena(void* mem, size_t bytes) :
-            begin_(static_cast<uint8_t*>(mem)), cur_(begin_), end_(begin_ + bytes), used_peak_(0), alloc_calls_(0) {}
+            begin_(static_cast<uint8_t*>(mem)), cur_(begin_), end_(begin_ + bytes)
+#ifdef SAP_CORE_ARENA_STATS
+            , used_peak_(0), alloc_calls_(0)
+#endif
+            {}
 
         void reset_to(void* mem, size_t bytes) {
             begin_ = static_cast<uint8_t*>(mem);
             cur_ = begin_;
             end_ = begin_ + bytes;
+#ifdef SAP_CORE_ARENA_STATS
             used_peak_ = 0;
             alloc_calls_ = 0;
+#endif
         }
 
         void* allocate(size_t bytes, size_t align) {
@@ -36,10 +46,12 @@ namespace stl {
             if (aligned + bytes > end_)
                 return nullptr;
             cur_ = aligned + bytes;
+#ifdef SAP_CORE_ARENA_STATS
             size_t u = used();
             if (u > used_peak_)
                 used_peak_ = u;
             ++alloc_calls_;
+#endif
             return aligned;
         }
 
@@ -49,15 +61,19 @@ namespace stl {
 
         size_t capacity() const noexcept { return static_cast<size_t>(end_ - begin_); }
         size_t used() const noexcept { return static_cast<size_t>(cur_ - begin_); }
+#ifdef SAP_CORE_ARENA_STATS
         size_t peak() const noexcept { return used_peak_; }
         size_t alloc_calls() const noexcept { return alloc_calls_; }
+#endif
 
     private:
         uint8_t* begin_;
         uint8_t* cur_;
         uint8_t* end_;
+#ifdef SAP_CORE_ARENA_STATS
         size_t used_peak_;
         size_t alloc_calls_;
+#endif
     };
 
     // Fixed-block pool backed by a linear_arena.
@@ -68,8 +84,11 @@ namespace stl {
         fixed_block_pool() = default;
 
         fixed_block_pool(linear_arena* arena, size_t block_size, size_t blocks_per_chunk = 256) :
-            arena_(arena), blk_size_(block_size < sizeof(node) ? sizeof(node) : block_size), per_chunk_(blocks_per_chunk), free_(nullptr),
-            chunks_allocated_(0) {}
+            arena_(arena), blk_size_(block_size < sizeof(node) ? sizeof(node) : block_size), per_chunk_(blocks_per_chunk), free_(nullptr)
+#ifdef SAP_CORE_ARENA_STATS
+            , chunks_allocated_(0)
+#endif
+            {}
 
         void* allocate() {
             if (!free_)
@@ -88,7 +107,9 @@ namespace stl {
         }
 
         size_t block_size() const noexcept { return blk_size_; }
+#ifdef SAP_CORE_ARENA_STATS
         size_t chunks() const noexcept { return chunks_allocated_; }
+#endif
 
     private:
         void add_chunk() {
@@ -102,7 +123,9 @@ namespace stl {
                 n->next = free_;
                 free_ = n;
             }
+#ifdef SAP_CORE_ARENA_STATS
             ++chunks_allocated_;
+#endif
         }
 
         struct node {
@@ -113,7 +136,9 @@ namespace stl {
         size_t blk_size_{0};
         size_t per_chunk_{0};
         node* free_{nullptr};
+#ifdef SAP_CORE_ARENA_STATS
         size_t chunks_allocated_{0};
+#endif
     };
 
 } // namespace stl
