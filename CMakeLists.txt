@@ -16,6 +16,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS True)
 option(SAP_CORE_BUILD_SHARED "Build shared library" ON)
 option(SAP_CORE_BUILD_STATIC "Build static library" ON)
 option(SAP_CORE_BUILD_TESTS "Build tests" ON)
+option(SAP_CORE_BUILD_BENCHMARKS "Build benchmarks" OFF)
 
 set(SAP_CORE_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/sap_core/types.h
@@ -127,6 +128,44 @@ if(SAP_CORE_BUILD_TESTS)
 
     include(GoogleTest)
     gtest_discover_tests(sap_core_tests)
+endif()
+
+# Benchmarks
+if(SAP_CORE_BUILD_BENCHMARKS)
+    include(FetchContent)
+    set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_WERROR OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        benchmark
+        GIT_REPOSITORY https://github.com/google/benchmark.git
+        GIT_TAG v1.9.4
+    )
+    FetchContent_MakeAvailable(benchmark)
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(benchmark PRIVATE -Wno-c2y-extensions)
+        target_compile_options(benchmark_main PRIVATE -Wno-c2y-extensions)
+    endif()
+
+    file(GLOB SAP_CORE_BENCHMARK_SOURCES CONFIGURE_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/*.cpp
+    )
+    if(NOT SAP_CORE_BENCHMARK_SOURCES)
+        # Placeholder so the target is valid before any benchmark .cpp files exist.
+        set(SAP_CORE_BENCHMARK_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/main.cpp)
+    endif()
+
+    add_executable(sap_core_benchmarks ${SAP_CORE_BENCHMARK_SOURCES})
+
+    if(SAP_CORE_BUILD_STATIC)
+        target_link_libraries(sap_core_benchmarks PRIVATE sap_core_static)
+    else()
+        target_link_libraries(sap_core_benchmarks PRIVATE sap_core_shared)
+    endif()
+
+    target_link_libraries(sap_core_benchmarks PRIVATE benchmark::benchmark_main)
 endif()
 
 # Installation
