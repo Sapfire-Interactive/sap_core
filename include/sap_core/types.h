@@ -8,16 +8,10 @@
 #include "sap_core/stl/functional.h"
 #include "sap_core/stl/mutex.h"
 #include "sap_core/stl/optional.h"
-#include <cstdint>
-#include <sstream>
-
-#include "sap_core/stl/string_view.h"
-#include "sap_core/stl/thread.h"
-#include <utility>
-
 #include "sap_core/stl/queue.h"
 #include "sap_core/stl/span.h"
-
+#include "sap_core/stl/string_view.h"
+#include "sap_core/stl/thread.h"
 #include "sap_core/stl/tuple.h"
 
 #include <cstdint>
@@ -37,7 +31,6 @@ using f64 = double;
 
 namespace stl {
 
-    // Memory size helpers
     constexpr inline u64 gibibytes(u32 amount) { return static_cast<u64>(amount) * 1024ULL * 1024ULL * 1024ULL; }
     constexpr inline u64 mebibytes(u32 amount) { return static_cast<u64>(amount) * 1024ULL * 1024ULL; }
     constexpr inline u64 kibibytes(u32 amount) { return static_cast<u64>(amount) * 1024ULL; }
