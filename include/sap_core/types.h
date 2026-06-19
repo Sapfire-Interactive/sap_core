@@ -3,9 +3,9 @@
 #include "sap_core/stl/array.h"
 #include "sap_core/stl/atomic.h"
 #include "sap_core/stl/bitset.h"
+#include "sap_core/stl/condition_variable.h"
 #include "sap_core/stl/functional.h"
 #include "sap_core/stl/mutex.h"
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -37,8 +37,6 @@ using f64 = double;
 
 namespace stl {
 
-    using condition_variable = std::condition_variable;
-
     using thread = std::thread;
     using jthread = std::jthread;
     using stop_token = std::stop_token;
@@ -49,9 +47,6 @@ namespace stl {
         using std::this_thread::get_id;
         using std::this_thread::yield;
     }
-
-    using condition_variable_any = std::condition_variable_any;
-    using condition_variable = std::condition_variable;
 
     template <typename T>
     using optional = std::optional<T>;
