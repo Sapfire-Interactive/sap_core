@@ -10,9 +10,9 @@
 #include <cstdint>
 #include <optional>
 #include <sstream>
-#include <thread>
 
 #include "sap_core/stl/string_view.h"
+#include "sap_core/stl/thread.h"
 #include <utility>
 
 #include "sap_core/stl/queue.h"
@@ -36,17 +36,6 @@ using f32 = float;
 using f64 = double;
 
 namespace stl {
-
-    using thread = std::thread;
-    using jthread = std::jthread;
-    using stop_token = std::stop_token;
-
-    namespace this_thread {
-        using std::this_thread::sleep_for;
-        using std::this_thread::sleep_until;
-        using std::this_thread::get_id;
-        using std::this_thread::yield;
-    }
 
     template <typename T>
     using optional = std::optional<T>;
