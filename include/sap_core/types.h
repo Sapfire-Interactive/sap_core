@@ -11,8 +11,9 @@
 #include <optional>
 #include <span>
 #include <sstream>
-#include <string_view>
 #include <thread>
+
+#include "sap_core/stl/string_view.h"
 #include <utility>
 
 #include "sap_core/stl/queue.h"
@@ -41,9 +42,6 @@ namespace stl {
 
     template <typename T>
     using function = std::function<T>;
-
-    using string_view = std::string_view;
-    using wstring_view = std::wstring_view;
 
     using mutex = std::mutex;
     using recursive_mutex = std::recursive_mutex;
