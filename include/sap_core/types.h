@@ -4,10 +4,10 @@
 #include "sap_core/stl/atomic.h"
 #include "sap_core/stl/bitset.h"
 #include "sap_core/stl/condition_variable.h"
+#include "sap_core/stl/cstddef.h"
 #include "sap_core/stl/functional.h"
 #include "sap_core/stl/mutex.h"
 #include "sap_core/stl/optional.h"
-#include <cstddef>
 #include <cstdint>
 #include <sstream>
 
@@ -36,10 +36,6 @@ using f32 = float;
 using f64 = double;
 
 namespace stl {
-
-    using byte = std::byte;
-
-    using size_t = std::size_t;
 
     // Memory size helpers
     constexpr inline u64 gibibytes(u32 amount) { return static_cast<u64>(amount) * 1024ULL * 1024ULL * 1024ULL; }
