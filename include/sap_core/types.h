@@ -3,10 +3,10 @@
 #include "sap_core/stl/array.h"
 #include "sap_core/stl/atomic.h"
 #include "sap_core/stl/bitset.h"
+#include "sap_core/stl/functional.h"
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -36,12 +36,6 @@ using f32 = float;
 using f64 = double;
 
 namespace stl {
-
-    template <class T>
-    using reference_wrapper = std::reference_wrapper<T>;
-
-    template <typename T>
-    using function = std::function<T>;
 
     using mutex = std::mutex;
     using recursive_mutex = std::recursive_mutex;
