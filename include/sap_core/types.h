@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sap_core/stl/array.h"
+#include "sap_core/stl/atomic.h"
 #include "sap_core/stl/bitset.h"
 #include <condition_variable>
 #include <cstddef>
@@ -92,9 +93,6 @@ namespace stl {
     constexpr auto as_writable_bytes(std::span<T, Extent> s) noexcept {
         return std::as_writable_bytes(s);
     }
-
-    template <typename T>
-    using atomic = std::atomic<T>;
 
     using size_t = std::size_t;
 
