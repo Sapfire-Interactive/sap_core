@@ -15,6 +15,6 @@ namespace sap::async {
     //     iteration, woken via reactor.wake().
     // Returns immediately so callers compile cleanly; do not rely on it
     // until replaced.
-    Task<void> sleep_for(Executor&, std::chrono::milliseconds) { co_return; }
+    Task<void> sleep_for(Executor&, std::chrono::milliseconds, StopToken) { co_return; }
 
 } // namespace sap::async

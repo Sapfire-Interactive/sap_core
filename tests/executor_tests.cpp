@@ -1,7 +1,9 @@
 #include "sap_core/async/executor.h"
 #include "sap_core/async/sleep_for.h"
+#include "sap_core/async/spawn.h"
 #include "sap_core/async/sync_wait.h"
 #include "sap_core/async/task.h"
+#include "sap_core/stl/coroutine.h"
 
 #include <gtest/gtest.h>
 
@@ -10,6 +12,7 @@
 
 using sap::async::Executor;
 using sap::async::sleep_for;
+using sap::async::spawn;
 using sap::async::Task;
 
 namespace {
@@ -133,4 +136,50 @@ TEST(ExecutorTest, SleepFiresInArgumentOrderForSameDeadline) {
     EXPECT_NE(order[0], order[1]);
     EXPECT_NE(order[1], order[2]);
     EXPECT_NE(order[0], order[2]);
+}
+
+TEST(ExecutorTest, RunUntil_HandleAlreadyDone_ReturnsImmediately) {
+    auto exr = Executor::create();
+    auto& ex = exr.value();
+
+    auto h = spawn(ex, []() -> Task<int> { co_return 1; }());
+    ASSERT_TRUE(h.done());
+
+    auto start = std::chrono::steady_clock::now();
+    ex.run_until(h.handle());
+    auto dt = std::chrono::steady_clock::now() - start;
+    EXPECT_LT(dt, std::chrono::milliseconds(50));
+}
+
+TEST(ExecutorTest, RunUntil_PendingIO_DrivesToCompletion) {
+    auto exr = Executor::create();
+    auto& ex = exr.value();
+
+    auto h = spawn(ex, [&ex]() -> Task<void> {
+        co_await sleep_for(ex, std::chrono::milliseconds(100));
+    }());
+    ASSERT_FALSE(h.done());
+
+    auto start = std::chrono::steady_clock::now();
+    ex.run_until(h.handle());
+    auto dt = std::chrono::steady_clock::now() - start;
+
+    EXPECT_TRUE(h.done());
+    EXPECT_GE(dt, std::chrono::milliseconds(90));
+    EXPECT_LT(dt, std::chrono::seconds(2));
+}
+
+TEST(ExecutorTest, RunUntil_NothingToDo_ExitsCleanly) {
+    auto exr = Executor::create();
+    auto& ex = exr.value();
+
+    // Unresumed Task<void>: frame is at initial_suspend (suspend_always), done()=false.
+    // run_until has no ready work and no pending I/O — must exit, not block.
+    auto parked = []() -> Task<void> { co_await stl::suspend_always{}; }();
+    ASSERT_FALSE(parked.done());
+
+    auto start = std::chrono::steady_clock::now();
+    ex.run_until(parked.handle());
+    auto dt = std::chrono::steady_clock::now() - start;
+    EXPECT_LT(dt, std::chrono::milliseconds(50));
 }

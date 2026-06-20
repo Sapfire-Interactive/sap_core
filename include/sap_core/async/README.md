@@ -1,38 +1,82 @@
 # `sap::async`
 
-C++20 coroutine primitives for sap_core. Header-only.
+C++20 coroutine primitives, a single-threaded executor, cancellation
+tokens, and time/IO awaitables for sap_core.
 
 ```cpp
-#include <sap_core/async/task.h>
-#include <sap_core/async/sync_wait.h>
-#include <sap_core/async/when_all.h>
-#include <sap_core/async/when_any.h>
+#include <sap_core/async/task.h>        // Task<T>
+#include <sap_core/async/sync_wait.h>   // sync_wait(Task<T>)
+#include <sap_core/async/when_all.h>    // when_all(Task<Ts>...)
+#include <sap_core/async/executor.h>    // Executor, IoAwaiter
+#include <sap_core/async/sleep_for.h>   // sleep_for
+#include <sap_core/async/spawn.h>       // spawn, SpawnHandle, sync_wait(SpawnHandle)
+#include <sap_core/async/stop_token.h>  // StopSource, StopToken, CancelledError
 ```
 
 ## Quick reference
 
-| Type / function | What it is |
-|---|---|
-| `sap::async::Task<T>` | The coroutine return type. Awaitable; can be detached. |
-| `sap::async::sync_wait(Task<T>)` | Run a Task to completion on the calling thread. Returns `T`. |
-| `sap::async::when_all(Task<T>...)` | Run multiple Tasks concurrently; returns `Task<tuple<T...>>`. |
-| `sap::async::when_any(Task<T>...)` | Race multiple Tasks; returns `Task<variant<T...>>` with whichever finished first. |
+| Type / function                       | Purpose                                                            |
+|---------------------------------------|--------------------------------------------------------------------|
+| `Task<T>`                             | Coroutine return type. Lazy; awaitable; can be detached.           |
+| `sync_wait(Task<T>)`                  | Blocking driver for tasks that don't suspend on I/O.               |
+| `when_all(Task<Ts>...)`               | Compose multiple tasks; returns `Task<tuple<Ts...>>`.              |
+| `Executor`                            | Single-threaded run loop tied to a `sap::io::Reactor`.             |
+| `Executor::run_until(handle)`         | Drive the loop until a specific coroutine handle is done.          |
+| `IoAwaiter`                           | Bridge a coroutine to a reactor: park until a fd is ready.         |
+| `sleep_for(ex, dt[, tok])`            | Cancellable delay.                                                 |
+| `spawn(ex, Task<T>) → SpawnHandle<T>` | Start a task now; collect later.                                   |
+| `sync_wait(SpawnHandle<T>&&)`         | Sync collection that drives the executor's reactor.                |
+| `StopSource` / `StopToken`            | Cooperative cancellation primitives.                               |
+| `CancelledError`                      | Exception thrown by a cancelled `IoAwaiter`.                       |
+
+## End-to-end example
+
+```cpp
+#include <sap_core/async/executor.h>
+#include <sap_core/async/sleep_for.h>
+#include <sap_core/async/spawn.h>
+#include <sap_core/async/stop_token.h>
+#include <sap_core/async/task.h>
+
+using namespace sap::async;
+using namespace std::chrono_literals;
+
+Task<int> fetch(Executor& ex, StopToken tok) {
+    co_await sleep_for(ex, 100ms, tok);
+    co_return 42;
+}
+
+int main() {
+    auto exr = Executor::create();
+    auto& ex = exr.value();
+
+    StopSource src;
+    auto handle = spawn(ex, fetch(ex, src.token()));
+
+    // ... synchronous work runs in parallel with fetch's sleep ...
+
+    int v = sync_wait(stl::move(handle));   // drives the executor until fetch is done
+    return v;
+}
+```
 
 ---
 
 ## `Task<T>`
 
 Coroutine return type. **Lazy**: the body doesn't execute until somebody
-consumes the Task. The two ways to consume one are `co_await` (from another
-coroutine) and `sync_wait` (from synchronous code). The third option is
-`.detach()` — fire-and-forget, can't collect the result.
+consumes the Task. The three ways to consume one:
+
+1. `co_await task` — from inside another Task.
+2. `sync_wait(task)` — from synchronous code (no reactor).
+3. `task.detach()` — fire-and-forget; result discarded.
 
 ```cpp
-sap::async::Task<int> compute() {
+Task<int> compute() {
     co_return 42;
 }
 
-sap::async::Task<int> use_it() {
+Task<int> use_it() {
     int n = co_await compute();   // body runs here
     co_return n * 2;
 }
@@ -40,127 +84,337 @@ sap::async::Task<int> use_it() {
 
 ### `.detach()`
 
-Releases ownership of the coroutine frame and starts the body running. The
-frame self-destroys on completion. Exceptions thrown inside a detached Task
-have no awaiter to surface to — they're stored in the promise and discarded
-on frame destruction. Use this for "I don't care about the result and
-nothing else will await it" cases.
+Releases ownership of the coroutine frame and starts the body running.
+The frame self-destroys on completion. Exceptions thrown inside a
+detached Task are stored in the promise and discarded on frame
+destruction.
 
 ```cpp
-auto bg = log_to_disk_async();  // returns Task<void>
-bg.detach();                     // starts running; the Task object can be dropped
+auto bg = log_to_disk_async();
+bg.detach();
 ```
 
 ### Move-only
 
-Coroutine handles can't be copied without double-freeing the frame. Always
-move:
+Coroutine handles can't be copied without double-freeing the frame.
 
 ```cpp
-sap::async::Task<int> t = compute();
-auto t2 = std::move(t);   // OK
+Task<int> t = compute();
+auto t2 = stl::move(t);   // OK
 auto t3 = t;              // compile error
 ```
 
 ### `value_type`
 
-`Task<T>::value_type` is `T`. Useful for combinators that need to extract
-the value type from a Task at compile time.
+`Task<T>::value_type` is `T`. Useful for combinators that need to
+extract the value type from a Task at compile time.
 
 ---
 
 ## `sync_wait`
 
-The top-level driver. Takes a Task, blocks the calling thread until the
-Task finishes, returns its value (or rethrows its exception). Use this in
-`main()`, in tests, and anywhere else synchronous code needs to consume an
-async result.
+Two overloads:
 
 ```cpp
-sap::async::Task<int> compute_async() { co_return 7; }
+T sync_wait(Task<T> task);
+T sync_wait(SpawnHandle<T>&& handle);
+```
+
+`sync_wait(Task<T>)` blocks the calling thread and drives the Task to
+completion **synchronously**. It does not run an event loop, so a Task
+that suspends on real I/O (e.g. via an `IoAwaiter`) won't be resumed.
+Use it for pure computation, composed tasks that all reduce to
+synchronous work, or tasks that complete immediately.
+
+```cpp
+Task<int> sum_async() { co_return 7; }
 
 int main() {
-    int n = sap::async::sync_wait(compute_async());
+    int n = sync_wait(sum_async());
     return n;
 }
 ```
 
-If the Task throws, the exception is rethrown out of `sync_wait`. If the
-Task is void, `sync_wait` returns void.
+`sync_wait(SpawnHandle<T>&&)` drives the **executor** (via
+`run_until`) until the handle is done — so it works for tasks that
+park on I/O. See `spawn` below.
 
-`sync_wait` blocks the thread. It is **not** an executor — it has no
-event loop. A Task that suspends waiting on I/O won't be resumed by
-`sync_wait` alone. For now, use it only for Tasks that complete without
-external resumption (synchronous logic, computation, composed Tasks that
-all reduce to synchronous work).
+If the Task throws, the exception is rethrown out of `sync_wait`.
 
 ---
 
 ## `when_all`
 
-Runs multiple Tasks concurrently and returns a `Task` that completes when
-all of them have completed. The result is a `tuple` of their return values
-in argument order.
+Runs multiple Tasks and returns a `Task` that completes once every input
+has completed. The result is a `tuple` in argument order.
 
 ```cpp
-sap::async::Task<int>    fetch_user();
-sap::async::Task<bool>   fetch_flag();
-sap::async::Task<double> fetch_score();
+Task<int>    fetch_user();
+Task<bool>   fetch_flag();
+Task<double> fetch_score();
 
-auto [user, flag, score] = sap::async::sync_wait(
-    sap::async::when_all(fetch_user(), fetch_flag(), fetch_score())
-);
+auto [user, flag, score] = sync_wait(
+    when_all(fetch_user(), fetch_flag(), fetch_score()));
 ```
 
-All input Tasks are started together; the awaiter resumes once every Task
-has finished. Total wall-clock time is `max(t1, t2, t3)`, not their sum.
+Today's implementation is **sequential**: tasks are awaited in argument
+order. The contract (returned tuple, exception propagation, ordering)
+matches the eventual concurrent implementation, so user code is
+forward-compatible. The wall-clock improvement arrives later.
 
 ### Exceptions
 
-If any Task throws, the exception is propagated out of `when_all` and the
+If any Task throws, the exception is propagated out of `when_all` and
 remaining results are discarded.
 
 ### Restrictions
 
-- Void Tasks are not supported (can't put `void` in a `tuple`).
+- Void Tasks aren't supported (can't put `void` in a `tuple`).
 - Tasks are consumed by value — pass `make_task()` directly or
-  `std::move(task)` for named locals.
+  `stl::move(task)` for named locals.
 
 ---
 
-## `when_any`
+## `Executor`
 
-Runs multiple Tasks concurrently and returns a `Task` that completes as
-soon as **any one** of them finishes. The result is a `variant` whose
-active index identifies the winner.
+Single-threaded coroutine driver. Owns a `sap::io::Reactor` (epoll on
+Linux, IOCP+AFD on Windows). The run loop alternates between draining a
+ready queue of coroutine handles and parking in `reactor.wait()`.
 
 ```cpp
-auto data_task    = fetch_from_primary();
-auto fallback     = fetch_from_replica();
+auto exr = Executor::create();
+if (!exr) {
+    // Reactor allocation failed (fd limits, OOM, etc.)
+    return 1;
+}
+auto& ex = exr.value();
 
-auto result = sap::async::sync_wait(
-    sap::async::when_any(std::move(data_task), std::move(fallback))
-);
+ex.spawn_detach(my_task());   // fire-and-forget
+ex.run();                     // block until everything's done
+```
 
-if (result.index() == 0) {
-    use_primary(std::get<0>(result));
-} else {
-    use_replica(std::get<1>(result));
+### Lifecycle methods
+
+| Method                       | What it does                                                            |
+|------------------------------|-------------------------------------------------------------------------|
+| `run()`                      | Drive until ready queue and pending I/O are both empty (or `stop()`).   |
+| `run_until(handle)`          | Drive until `handle.done()` (or stop, or nothing left to do).           |
+| `stop()`                     | Set a flag; loop exits on its next iteration.                           |
+| `schedule(handle)`           | Push a coroutine handle onto the ready queue.                           |
+| `spawn_detach(Task<T>)`      | Detach a task and run its body up to first suspension.                  |
+| `reactor()`                  | Access the underlying `sap::io::Reactor` (thread-safe `wake()`).        |
+
+### Threading
+
+Strictly single-threaded. All methods (including `stop()`,
+`run_until()`, and `schedule()`) must run on the thread that called
+`run()`. The only thread-safe surface is `ex.reactor().wake()` —
+useful to nudge a parked `wait()` from a signal handler or a
+file-I/O worker thread.
+
+If you want cross-thread `stop()` or `schedule()`, the smallest
+upgrade is an atomic running-flag + a lock-guarded post queue.
+That's a future change; today, don't reach across threads.
+
+### IoAwaiter
+
+The bridge between a coroutine and the reactor:
+
+```cpp
+Task<void> wait_readable(Executor& ex, int fd) {
+    IoAwaiter awaiter(ex, fd, sap::io::Event::Readable);
+    sap::io::Event fired = co_await awaiter;
+    // fd is ready to read
 }
 ```
 
-Use cases: deadline races (kick off real work alongside a `sleep` Task and
-take whichever wins), redundant fetches (whichever upstream replies first),
-"any of these resources" patterns.
+With cancellation:
 
-### Exceptions
+```cpp
+Task<void> wait_or_cancel(Executor& ex, int fd, StopToken tok) {
+    IoAwaiter awaiter(ex, fd, sap::io::Event::Readable, stl::move(tok));
+    co_await awaiter;   // throws CancelledError on stop_requested
+}
+```
 
-If the winning Task threw, the exception is rethrown out of `when_any`.
-Losing Tasks' exceptions, if any, are discarded.
+**The awaiter's address is the reactor token**, so it must live across
+the suspend point. Always declare it as a local in the coroutine body;
+coroutine locals are pinned in the heap-allocated frame.
 
-### Restrictions
+---
 
-Same as `when_all`: no void Tasks, by-value parameters.
+## `sleep_for`
+
+Cancellable delay backed by `timerfd` on Linux. Windows is currently a
+stub that returns immediately.
+
+```cpp
+co_await sleep_for(ex, 100ms);            // uncancellable
+
+co_await sleep_for(ex, 100ms, my_token);  // cancellable
+```
+
+Example heartbeat loop that exits when the source flips:
+
+```cpp
+Task<void> heartbeat(Executor& ex, StopToken tok) {
+    while (!tok.stop_requested()) {
+        co_await sleep_for(ex, 1s, tok);
+        emit_heartbeat();
+    }
+}
+```
+
+---
+
+## `spawn` / `SpawnHandle`
+
+"Start now, await later." Lets you eagerly kick off a Task and either
+collect its result via `co_await` (from another Task) or `sync_wait`
+(synchronously).
+
+```cpp
+Task<int> compute(Executor& ex) {
+    co_await sleep_for(ex, 100ms);
+    co_return 42;
+}
+
+Task<int> use(Executor& ex) {
+    auto h = spawn(ex, compute(ex));   // body starts running NOW
+    do_other_work();                   // overlaps with compute's sleep
+    co_return co_await stl::move(h);   // collect the result
+}
+```
+
+### `spawn` vs `Task::detach()`
+
+| Use                                  | Picks                |
+|--------------------------------------|----------------------|
+| Don't care about the result          | `task.detach()`      |
+| Will collect the result or exception | `spawn(ex, task)`    |
+
+### Single-shot
+
+A `SpawnHandle<T>` may be awaited at most once. The value is moved out
+of the promise's `optional<T>` at `co_await`; awaiting twice silently
+returns a moved-from value. Move the handle into the `co_await`:
+
+```cpp
+auto h = spawn(ex, compute(ex));
+int  v = co_await stl::move(h);    // consume
+```
+
+### Dropping a handle
+
+Dropping a `SpawnHandle` while its runner is pending does **not** cancel
+the task — the body keeps running and self-destroys at completion. The
+result and exception are discarded.
+
+If you want cancellation, use a `StopSource`.
+
+### Synchronous collection
+
+```cpp
+auto h = spawn(ex, fetch_thing(ex));
+int  v = sync_wait(stl::move(h));   // drives ex.run_until(h.handle())
+```
+
+`sync_wait(SpawnHandle<T>&&)` is the right tool when you're not inside
+a coroutine but the task suspends on real I/O. It's **not** re-entrant
+— don't call it from inside a coroutine the executor is already
+resuming. From inside a coroutine, use `co_await stl::move(h)`.
+
+### Concurrent overlap
+
+`when_all` collects all results in argument order; `spawn` lets you
+explicitly start work early and decide when to wait for it:
+
+```cpp
+Task<int> overlap(Executor& ex) {
+    auto a = spawn(ex, fetch_from_a(ex));
+    auto b = spawn(ex, fetch_from_b(ex));
+    // both running concurrently
+    co_return (co_await stl::move(a)) + (co_await stl::move(b));
+}
+```
+
+---
+
+## `StopSource` / `StopToken` / `CancelledError`
+
+Cooperative cancellation, opt-in per awaiter. Loosely modeled on
+`std::stop_token`.
+
+```cpp
+StopSource src;
+auto handle = spawn(ex, fetch(ex, src.token()));
+
+// ... later, from another task or before sync_wait ...
+src.request_stop();
+
+try {
+    int v = sync_wait(stl::move(handle));
+} catch (const CancelledError&) {
+    // task was cancelled mid-flight
+}
+```
+
+### Wiring the token
+
+The token is only useful where an awaiter accepts one. Today that's
+`IoAwaiter` and `sleep_for`. Plumb the token through every layer that
+should be cancellable:
+
+```cpp
+Task<int> inner(Executor& ex, StopToken tok) {
+    co_await sleep_for(ex, 10s, tok);
+    co_return 7;
+}
+
+Task<int> outer(Executor& ex, StopToken tok) {
+    co_return co_await inner(ex, stl::move(tok));
+}
+```
+
+Without a token, awaiters run to completion regardless of any
+`request_stop()` calls. Cancellation is opt-in.
+
+### Propagation
+
+A cancelled `IoAwaiter` throws `CancelledError`. The exception walks
+the `co_await` chain like any other exception — through inner Tasks,
+through `spawn`'s runner, out of `co_await handle`. You can catch it
+at any layer:
+
+```cpp
+Task<int> resilient(Executor& ex, StopToken tok) {
+    try {
+        co_return co_await fetch(ex, tok);
+    } catch (const CancelledError&) {
+        co_return fallback_value();
+    }
+}
+```
+
+### Lifetime
+
+`StopToken` holds a `stl::shared_ptr` to shared state — it's safe to
+copy, store, and outlive its `StopSource`. Once the source is gone,
+the token reflects whatever the last state was (probably "not
+requested").
+
+### Idempotence
+
+`StopSource::request_stop()` returns `true` if this call flipped the
+flag, `false` if it was already set. Each callback fires exactly once.
+
+### What doesn't get cancellation
+
+- Plain `sync_wait(Task<T>)` — no executor, no event loop, no
+  cancellation path.
+- Detached tasks — there's no handle to cancel.
+- Awaiters that don't take a token (`sleep_for(ex, dt)` overload, any
+  user-written `IoAwaiter` that omits the token argument).
 
 ---
 
@@ -168,112 +422,110 @@ Same as `when_all`: no void Tasks, by-value parameters.
 
 ### Lazy by default
 
-Constructing a Task does not start its body running:
+Constructing a Task does not start its body:
 
 ```cpp
-auto t = compute_heavy();   // nothing happens — no work, no I/O, no syscalls
+auto t = compute_heavy();   // nothing happens
 do_other_work();
-auto n = co_await t;        // NOW the body runs; you wait the full duration
+auto n = co_await t;        // body runs HERE — total = work + heavy
 ```
 
-The above runs serially: `do_other_work_time + compute_heavy_time`. If you
-want overlap, the in-between work has to either be expressed as a Task
-(then composed via `when_all`) or you have to explicitly start the Task
-running while keeping the awaitable to collect later.
+For overlap, use `spawn`:
 
-The "start now, await later" escape hatch is a `spawn`-style API and isn't
-in this directory yet. For now: use `when_all` if both sides are async, or
-restructure so the sync part comes after the await.
+```cpp
+auto h = spawn(ex, compute_heavy());   // starts now
+do_other_work();
+auto n = co_await stl::move(h);        // total = max(work, heavy)
+```
 
 ### By-value parameters across `co_await`
 
 Function parameters are stored in the coroutine frame, but **references
-are stored as references** — they don't get a copy of the referent. If a
-coroutine takes `const Foo&` and suspends, and the caller's `Foo` goes
-away during the suspension, the resumed coroutine has a dangling reference.
+are stored as references** — they don't get a copy of the referent.
+If a coroutine takes `const Foo&` and suspends, and the caller's `Foo`
+goes away during the suspension, the resumed coroutine has a dangling
+reference.
 
 ```cpp
 // DANGEROUS: req may not outlive the suspension.
-sap::async::Task<int> bad(const std::string& req) {
-    co_await sleep_a_bit();
-    co_return req.size();   // req might be gone
+Task<int> bad(const stl::string& req) {
+    co_await sleep_for(ex, 100ms);
+    co_return req.size();
 }
 
 // SAFE: req is moved into the coroutine frame.
-sap::async::Task<int> good(std::string req) {
-    co_await sleep_a_bit();
+Task<int> good(stl::string req) {
+    co_await sleep_for(ex, 100ms);
     co_return req.size();
 }
 ```
 
 Rule of thumb: take parameters by value (or move) in coroutines that
-suspend, unless the lifetime is guaranteed (e.g. the coroutine is itself
-driven by an owner that outlives every suspension point).
-
-### No default executor
-
-`Task<T>` doesn't know how to run itself. There is no implicit "main loop"
-that picks up freshly-constructed Tasks and runs them. You drive a Task
-by:
-
-1. `sync_wait` — blocks the calling thread until done.
-2. `co_await` from another Task — passes drive responsibility upstream.
-3. `.detach()` — releases ownership; the body runs but you can't collect
-   the result.
-
-This is intentional. C++ doesn't ship an executor — every framework picks
-its own. The current state of this directory is "language-level primitives
-only"; an executor lives elsewhere and will be added separately.
+suspend, unless the lifetime is guaranteed by the owner chain.
 
 ### Frame allocation cost
 
-Each Task creates a heap-allocated coroutine frame (typically 100–300
-bytes). For hot paths producing millions of Tasks, this can be measurable.
-Optimizer-driven Heap Allocation Elision (HALO) sometimes erases the
-allocation, but only when the Task's lifetime is fully visible to the
-compiler — usually not the case when the Task crosses a type-erased
-boundary like `std::function` or `Task` returned through a virtual method.
+Each Task creates a heap-allocated coroutine frame (typically
+100–300 bytes). For hot paths producing millions of Tasks, this can
+be measurable. Optimizer-driven Heap Allocation Elision (HALO) only
+fires when the Task's lifetime is fully visible to the compiler —
+not when the Task crosses a type-erased boundary like
+`stl::function` or a virtual call.
 
-If you need to bring this cost down, the standard mitigation is a custom
-`operator new` on the promise that allocates from an arena.
+If you need to bring the cost down, override `operator new` on the
+promise to allocate from an arena.
 
 ### Exception propagation
 
-| Where it's thrown | What happens |
-|---|---|
-| Inside a Task body | Stored in the promise. Rethrown when consumed via `co_await` or `sync_wait`. |
-| Inside `co_await some_task()` | Rethrown at the `co_await` expression; can be caught with `try/catch`. |
-| Inside a detached Task | Stored, never observed — discarded on frame destruction. |
-| Across `when_all`/`when_any` | First exception wins; remaining results / siblings are discarded. |
+| Where it's thrown                | What happens                                                              |
+|----------------------------------|---------------------------------------------------------------------------|
+| Task body                        | Stored in promise. Rethrown at `co_await` / `sync_wait`.                  |
+| `co_await some_task()`           | Rethrown at the `co_await` expression; `try/catch` catches normally.      |
+| Cancelled `IoAwaiter`            | Throws `CancelledError`; same propagation as any other exception.         |
+| Detached Task                    | Stored, never observed — discarded on frame destruction.                  |
+| `when_all`                       | First exception wins; remaining tasks' results are discarded.             |
+| Dropped `SpawnHandle` (pending)  | Stored in runner; discarded when runner self-destroys at `final_suspend`. |
 
 ### Coroutine identity across suspension
 
-When a coroutine resumes, it may be running on a different thread than the
-one that constructed it. This matters for:
+When a coroutine resumes, it's on the thread that called `resume()`.
+Today everything is single-threaded so this is the same thread, but
+when a multi-threaded executor lands, watch out for:
 
 - `thread_local` variables — not the same instance.
 - `std::this_thread::get_id()` — different return value.
-- RAII guards on the caller's stack — gone (the caller already returned).
+- RAII guards on the caller's stack — gone.
 
-This isn't an issue today because there's no executor yet (everything runs
-on the calling thread). It becomes important when a multi-threaded
-executor lands. Worth knowing now to avoid baking in single-thread
-assumptions.
+### Single-shot SpawnHandle
+
+`await_resume` moves out of the promise's `optional<T>`. Awaiting the
+same handle twice returns a moved-from `T`. Treat each handle as
+single-shot.
+
+```cpp
+auto h = spawn(ex, fetch(ex));
+auto a = co_await stl::move(h);   // OK
+auto b = co_await stl::move(h);   // h is empty; UB
+```
+
+### `sync_wait(SpawnHandle&&)` re-entrance
+
+Don't call this from inside a coroutine the executor is currently
+resuming. The executor is not re-entrant. From inside a coroutine,
+`co_await stl::move(h)` is the right tool.
 
 ---
 
 ## Implementation status
 
-Available now: `Task<T>`, `sync_wait`, `when_all`.
-
-`when_any` is described above but its implementation header is not yet in
-the tree — it depends on an executor that doesn't exist yet to actually
-race tasks. A sequential placeholder would be misleading (the name implies
-a race that wouldn't happen), so the function is intentionally absent
-until it can do what its name claims.
-
-`when_all` is shipped as a sequential implementation: tasks are awaited in
-argument order rather than truly concurrently. The contract — the returned
-tuple, exception propagation, ordering — is identical to the concurrent
-version, so user code is forward-compatible. The wall-clock improvement
-arrives when the executor does.
+| Item                                    | Status                                                      |
+|-----------------------------------------|-------------------------------------------------------------|
+| `Task<T>`, `sync_wait(Task<T>)`         | Shipped.                                                    |
+| `when_all`                              | Shipped (sequential; concurrent rewrite later).             |
+| `Executor`, `IoAwaiter`                 | Linux: shipped. Windows: depends on the IOCP reactor, which is implemented but unverified. |
+| `Executor::run_until`                   | Shipped.                                                    |
+| `sleep_for`                             | Linux: shipped. Windows: stub that returns immediately.     |
+| `spawn`, `SpawnHandle`                  | Shipped.                                                    |
+| `sync_wait(SpawnHandle<T>&&)`           | Shipped.                                                    |
+| `StopSource`, `StopToken`, `CancelledError` | Shipped.                                                |
+| `when_any`                              | Deferred — needs concurrent execution to be meaningful.     |

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "sap_core/async/stop_token.h"
 #include "sap_core/async/task.h"
 #include "sap_core/io/event.h"
 #include "sap_core/io/reactor.h"
@@ -14,16 +15,23 @@ namespace sap::async {
 
     class Executor;
 
-    // Suspends the awaiting coroutine until `handle` is ready for any of
-    // `interest`. The IoAwaiter's address is the reactor token, so it must
-    // live across suspension — i.e. as a local in the coroutine body, since
-    // coroutine locals persist in the heap-allocated frame.
+    // The awaiter's address is the reactor token, so the awaiter must live across
+    // the suspend point — i.e. as a local in the coroutine body (coroutine frame
+    // is heap-allocated, locals are pinned there).
     class IoAwaiter {
     public:
         IoAwaiter(Executor& ex, sap::io::NativeHandle handle, sap::io::Event interest) noexcept
             : m_ex(ex), m_handle(handle), m_interest(interest) {}
 
-        bool await_ready() const noexcept { return false; }
+        IoAwaiter(Executor& ex, sap::io::NativeHandle handle, sap::io::Event interest, StopToken tok) noexcept
+            : m_ex(ex), m_handle(handle), m_interest(interest), m_token(stl::move(tok)) {}
+
+        IoAwaiter(const IoAwaiter&)            = delete;
+        IoAwaiter& operator=(const IoAwaiter&) = delete;
+        IoAwaiter(IoAwaiter&&)                 = delete;
+        IoAwaiter& operator=(IoAwaiter&&)      = delete;
+
+        bool await_ready() const noexcept { return m_token.stop_possible() && m_token.stop_requested(); }
 
         void await_suspend(stl::coroutine_handle<> h);
 
@@ -32,18 +40,23 @@ namespace sap::async {
     private:
         friend class Executor;
 
-        Executor&               m_ex;
-        sap::io::NativeHandle   m_handle;
-        sap::io::Event          m_interest;
-        sap::io::Event          m_fired{};
-        stl::coroutine_handle<> m_continuation{};
+        static void on_cancel(void* arg) noexcept;
+
+        Executor&                  m_ex;
+        sap::io::NativeHandle      m_handle;
+        sap::io::Event             m_interest;
+        sap::io::Event             m_fired{};
+        stl::coroutine_handle<>    m_continuation{};
+        StopToken                  m_token;
+        detail::stop_callback_node m_cb_node{};
+        bool                       m_cancelled  = false;
+        bool                       m_queued     = false;
+        bool                       m_registered = false;
     };
 
-    // Single-threaded coroutine executor. All methods (schedule, run, stop,
-    // spawn_detach) must be called from the same thread — typically from
-    // coroutines the executor itself resumed. The only thread-safe surface
-    // here is reactor().wake(), inherited from Reactor; use it if another
-    // thread needs to nudge the loop.
+    // Single-threaded by contract. All methods (schedule, run, run_until, stop,
+    // spawn_detach) must be called from the same thread. reactor().wake() is the
+    // only thread-safe surface.
     class SAP_CORE_API Executor {
     public:
         static stl::result<Executor> create();
@@ -58,23 +71,20 @@ namespace sap::async {
 
         void schedule(stl::coroutine_handle<> h);
 
-        // Drives coroutines until both the ready queue and the pending-I/O set
-        // are empty, or until stop() is called.
         void run();
 
-        // Sets a flag; the run() loop exits on its next iteration.
+        // Drives the loop until target.done() (empty target = no target check).
+        // Also exits on stop() or when ready queue and pending I/O are both empty.
+        // Non-reentrant: do not call from a coroutine the executor is resuming.
+        void run_until(stl::coroutine_handle<> target);
+
         void stop();
 
-        // Fire-and-forget. Runs the body up to first suspension synchronously;
-        // any later resumption happens via the reactor. Not the same as
-        // sap::async::spawn() (which returns an awaitable handle for the result).
         template <typename T>
         void spawn_detach(Task<T> task) {
             task.detach();
         }
 
-        // Public so stl::result<Executor> can construct in-place. Prefer
-        // calling create() — it does the Reactor setup for you.
         explicit Executor(sap::io::Reactor r) noexcept : m_reactor(stl::move(r)) {}
 
     private:
@@ -89,15 +99,39 @@ namespace sap::async {
     inline void IoAwaiter::await_suspend(stl::coroutine_handle<> h) {
         m_continuation = h;
         ++m_ex.m_pending_io;
-        // If reactor.add fails the continuation never resumes via I/O; the
-        // caller's await_resume hands back Event::None to signal "no fire."
         (void)m_ex.reactor().add(m_handle, m_interest, reinterpret_cast<u64>(this));
+        m_registered = true;
+        if (m_token.stop_possible())
+            m_token._arm(&m_cb_node, &IoAwaiter::on_cancel, this);
     }
 
     inline sap::io::Event IoAwaiter::await_resume() {
-        (void)m_ex.reactor().remove(m_handle);
-        --m_ex.m_pending_io;
+        bool cancelled = m_cancelled || (m_token.stop_possible() && m_token.stop_requested());
+        if (m_registered) {
+            (void)m_ex.reactor().remove(m_handle);
+            m_registered = false;
+            --m_ex.m_pending_io;
+        }
+        if (cancelled)
+            throw CancelledError{};
         return m_fired;
+    }
+
+    inline void IoAwaiter::on_cancel(void* arg) noexcept {
+        auto* self = static_cast<IoAwaiter*>(arg);
+        if (self->m_cancelled)
+            return;
+        self->m_cancelled = true;
+        if (self->m_registered) {
+            (void)self->m_ex.reactor().remove(self->m_handle);
+            self->m_registered = false;
+            --self->m_ex.m_pending_io;
+        }
+        // Trigger path may have already queued the continuation; don't double-push.
+        if (!self->m_queued && self->m_continuation) {
+            self->m_queued = true;
+            self->m_ex.m_ready.push_back(self->m_continuation);
+        }
     }
 
 } // namespace sap::async

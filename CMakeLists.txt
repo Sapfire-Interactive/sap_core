@@ -123,6 +123,8 @@ if(SAP_CORE_BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/when_all_tests.cpp
         $<$<PLATFORM_ID:Linux>:${CMAKE_CURRENT_SOURCE_DIR}/tests/reactor_tests.cpp>
         $<$<PLATFORM_ID:Linux>:${CMAKE_CURRENT_SOURCE_DIR}/tests/executor_tests.cpp>
+        $<$<PLATFORM_ID:Linux>:${CMAKE_CURRENT_SOURCE_DIR}/tests/spawn_tests.cpp>
+        $<$<PLATFORM_ID:Linux>:${CMAKE_CURRENT_SOURCE_DIR}/tests/cancellation_tests.cpp>
     )
 
     if(SAP_CORE_BUILD_STATIC)

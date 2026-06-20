@@ -23,16 +23,23 @@ namespace sap::async {
 
     void Executor::stop() { m_running = false; }
 
-    void Executor::run() {
+    void Executor::run() { run_until({}); }
+
+    void Executor::run_until(stl::coroutine_handle<> target) {
         m_running = true;
 
         sap::io::Trigger triggers[sap::io::Reactor::MAX_EVENTS_PER_WAIT];
 
         while (m_running) {
+            if (target && target.done())
+                return;
+
             while (!m_ready.empty() && m_running) {
                 auto h = m_ready.front();
                 m_ready.pop_front();
                 h.resume();
+                if (target && target.done())
+                    return;
             }
 
             if (!m_running)
@@ -48,9 +55,12 @@ namespace sap::async {
             }
 
             for (stl::size_t i = 0; i < n.value(); ++i) {
-                auto* awaiter      = reinterpret_cast<IoAwaiter*>(triggers[i].user_token);
-                awaiter->m_fired   = triggers[i].events;
-                m_ready.push_back(awaiter->m_continuation);
+                auto* awaiter    = reinterpret_cast<IoAwaiter*>(triggers[i].user_token);
+                awaiter->m_fired = triggers[i].events;
+                if (!awaiter->m_queued) {
+                    awaiter->m_queued = true;
+                    m_ready.push_back(awaiter->m_continuation);
+                }
             }
         }
     }
