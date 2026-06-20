@@ -28,10 +28,13 @@ set(SAP_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/serialization.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/guid.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/timer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/async/executor.cpp
     $<$<PLATFORM_ID:Linux>:${CMAKE_CURRENT_SOURCE_DIR}/src/posix_clock.cpp>
     $<$<PLATFORM_ID:Linux>:${CMAKE_CURRENT_SOURCE_DIR}/src/io/epoll_reactor.cpp>
+    $<$<PLATFORM_ID:Linux>:${CMAKE_CURRENT_SOURCE_DIR}/src/async/sleep_linux.cpp>
     $<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_SOURCE_DIR}/src/windows_clock.cpp>
     $<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_SOURCE_DIR}/src/io/iocp_reactor.cpp>
+    $<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_SOURCE_DIR}/src/async/sleep_windows.cpp>
 )
 
 # Shared library
@@ -119,6 +122,7 @@ if(SAP_CORE_BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/task_tests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/when_all_tests.cpp
         $<$<PLATFORM_ID:Linux>:${CMAKE_CURRENT_SOURCE_DIR}/tests/reactor_tests.cpp>
+        $<$<PLATFORM_ID:Linux>:${CMAKE_CURRENT_SOURCE_DIR}/tests/executor_tests.cpp>
     )
 
     if(SAP_CORE_BUILD_STATIC)
