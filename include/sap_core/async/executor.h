@@ -7,13 +7,27 @@
 #include "sap_core/platform.h"
 #include "sap_core/stl/coroutine.h"
 #include "sap_core/stl/deque.h"
+#include "sap_core/stl/fixed_string.h"
 #include "sap_core/stl/result.h"
 #include "sap_core/stl/utility.h"
 #include "sap_core/types.h"
 
+#include <exception>
+
 namespace sap::async {
 
     class Executor;
+
+    using ReactorErrorMessage = stl::fixed_string<127>;
+
+    class ReactorError : public std::exception {
+    public:
+        explicit ReactorError(ReactorErrorMessage msg) noexcept : m_msg(stl::move(msg)) {}
+        const char* what() const noexcept override { return m_msg.c_str(); }
+
+    private:
+        ReactorErrorMessage m_msg;
+    };
 
     // The awaiter's address is the reactor token, so the awaiter must live across
     // the suspend point — i.e. as a local in the coroutine body (coroutine frame
@@ -49,6 +63,7 @@ namespace sap::async {
         stl::coroutine_handle<>    m_continuation{};
         StopToken                  m_token;
         detail::stop_callback_node m_cb_node{};
+        ReactorErrorMessage        m_add_error;
         bool                       m_cancelled  = false;
         bool                       m_queued     = false;
         bool                       m_registered = false;
@@ -98,9 +113,16 @@ namespace sap::async {
 
     inline void IoAwaiter::await_suspend(stl::coroutine_handle<> h) {
         m_continuation = h;
-        ++m_ex.m_pending_io;
-        (void)m_ex.reactor().add(m_handle, m_interest, reinterpret_cast<u64>(this));
+        if (auto r = m_ex.reactor().add(m_handle, m_interest, reinterpret_cast<u64>(this)); !r) {
+            const auto& err = r.error();
+            stl::size_t len = err.size() > 127 ? 127 : err.size();
+            m_add_error     = ReactorErrorMessage(err.data(), len);
+            m_queued        = true;
+            m_ex.m_ready.push_back(h);
+            return;
+        }
         m_registered = true;
+        ++m_ex.m_pending_io;
         if (m_token.stop_possible())
             m_token._arm(&m_cb_node, &IoAwaiter::on_cancel, this);
     }
@@ -112,6 +134,8 @@ namespace sap::async {
             m_registered = false;
             --m_ex.m_pending_io;
         }
+        if (!m_add_error.empty())
+            throw ReactorError(stl::move(m_add_error));
         if (cancelled)
             throw CancelledError{};
         return m_fired;
