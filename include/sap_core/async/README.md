@@ -418,6 +418,90 @@ flag, `false` if it was already set. Each callback fires exactly once.
 
 ---
 
+## Awaiter cleanup contract
+
+Custom awaiters (anything that ends up as a local in a coroutine
+body and gets `co_await`ed) must clean up any external state they
+register during `await_suspend`, and they must do so from their
+destructor — not just from `await_resume`.
+
+This matters because a coroutine frame can be destroyed in several
+ways:
+
+1. **Natural completion** — the body runs to `co_return`, the
+   awaiter's `await_resume` runs, then the awaiter's destructor
+   runs as the frame unwinds.
+2. **Cancellation via `StopSource`** — the awaiter's `await_resume`
+   throws `CancelledError`. The frame unwinds, the awaiter
+   destructor runs.
+3. **Dropped `SpawnHandle` while pending** — the runner stays
+   alive until it completes (either by I/O firing naturally or by
+   you signalling a `StopSource`). The frame is *not* destroyed
+   prematurely.
+4. **`Task<T>` dropped without ever being awaited** — the body
+   never runs, no awaiters are constructed. Clean.
+
+Path (3) is the one that surprises people: dropping a `SpawnHandle`
+is **not** cancellation. If the task is parked on I/O that never
+fires (a connection that goes idle, a timer with no expiry, etc.),
+the frame leaks. Use `StopSource` to actually interrupt it.
+
+```cpp
+StopSource src;
+auto       h = spawn(ex, fetch(ex, src.token()));
+
+// Drop the handle — task keeps running.
+// Eventually you want it gone:
+src.request_stop();   // <-- this is what actually cancels
+```
+
+If you're writing a custom awaiter, the pattern is:
+
+```cpp
+class my_awaiter {
+public:
+    bool await_ready() const noexcept { /* ... */ }
+
+    void await_suspend(stl::coroutine_handle<> h) {
+        // Register something external.
+        m_token = external_thing::register(this);
+        m_registered = true;
+    }
+
+    auto await_resume() {
+        // Normal-path cleanup.
+        if (m_registered) {
+            external_thing::unregister(m_token);
+            m_registered = false;
+        }
+        // Return the value.
+    }
+
+    ~my_awaiter() {
+        // Frame-destruction cleanup. Same as await_resume's, but
+        // also handles the case where the frame was destroyed
+        // without await_resume running (e.g. a cancellation that
+        // throws before await_resume gets to clean up).
+        if (m_registered)
+            external_thing::unregister(m_token);
+    }
+
+private:
+    external_token m_token{};
+    bool           m_registered = false;
+};
+```
+
+`IoAwaiter` follows this pattern for the stop_callback list (via
+`stop_callback_node`'s destructor) but currently *not* for the
+reactor registration itself — the reactor is only deregistered from
+`await_resume`. This is safe as long as the awaiter is only ever
+destroyed via paths (1) or (2). The `SpawnHandle`-managed runner
+patterns never destroy an awaiter mid-park (the runner stays alive
+until it completes), so today's code is sound. If you write an
+awaiter that registers with the reactor directly, add the
+destructor cleanup yourself.
+
 ## Common pitfalls
 
 ### Lazy by default
