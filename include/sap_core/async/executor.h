@@ -79,8 +79,11 @@ namespace sap::async {
         ~Executor() = default;
         Executor(const Executor&)            = delete;
         Executor& operator=(const Executor&) = delete;
-        Executor(Executor&&)                 = delete;
-        Executor& operator=(Executor&&)      = delete;
+        // Movable, but only safe before any IoAwaiter is in flight — awaiters
+        // hold Executor& references that would dangle across a move. Same
+        // contract as TCPSocketAsync ("must outlive in-flight I/O").
+        Executor(Executor&&) noexcept                 = default;
+        Executor& operator=(Executor&&) noexcept      = default;
 
         sap::io::Reactor& reactor() noexcept { return m_reactor; }
 
