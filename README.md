@@ -28,6 +28,10 @@ Custom implementations backed by the allocator infrastructure above:
 ### Error handling
 - **`result<T, E>`** — discriminated union holding either a value or an error. Manual `union` storage with explicit placement new/destroy — no heap allocation, no exceptions. Ships with `RESULT_CHECK(f)` for early-return propagation.
 
+### Async I/O
+- **`sap::async`** — C++20 coroutine primitives: `Task<T>`, `Executor`, `IoAwaiter`, `sleep_for`, `spawn` / `SpawnHandle`, `StopSource` / `StopToken` / `CancelledError`, `when_all`, `sync_wait`. See [`include/sap_core/async/README.md`](include/sap_core/async/README.md).
+- **`sap::io`** — cross-platform readiness reactor (epoll on Linux, IOCP+AFD on Windows). Powers the executor. See [`include/sap_core/io/README.md`](include/sap_core/io/README.md).
+
 ### Utilities
 `clock` (POSIX + Windows), `timer`, `timestamp`, `guid`, `log`, `serialization`, platform detection macros.
 
