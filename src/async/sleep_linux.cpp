@@ -18,8 +18,6 @@ namespace sap::async {
 
     namespace {
 
-        // RAII so an exception thrown out of co_await (e.g. CancelledError)
-        // still closes the fd.
         struct fd_guard {
             int fd;
             explicit fd_guard(int f) noexcept : fd(f) {}
@@ -34,26 +32,27 @@ namespace sap::async {
 
     } // namespace
 
-    Task<void> sleep_for(Executor& ex, std::chrono::milliseconds dt, StopToken tok) {
+    Task<stl::result<>> sleep_for(Executor& ex, std::chrono::milliseconds dt, StopToken tok) {
         fd_guard tfd{::timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK)};
         if (tfd.fd < 0)
-            co_return;
+            co_return stl::make_error<>("sleep_for: timerfd_create failed: {}", errno);
 
         ::itimerspec spec{};
         spec.it_value.tv_sec  = static_cast<time_t>(dt.count() / 1000);
         spec.it_value.tv_nsec = static_cast<long>((dt.count() % 1000) * 1'000'000);
-        // Zero deadline means "disarm" on timerfd_settime, not "fire now".
         if (spec.it_value.tv_sec == 0 && spec.it_value.tv_nsec == 0)
             spec.it_value.tv_nsec = 1;
 
         if (::timerfd_settime(tfd.fd, 0, &spec, nullptr) < 0)
-            co_return;
+            co_return stl::make_error<>("sleep_for: timerfd_settime failed: {}", errno);
 
         IoAwaiter awaiter(ex, tfd.fd, sap::io::Event::Readable, stl::move(tok));
-        co_await awaiter;
+        if (auto r = co_await awaiter; !r)
+            co_return r;
 
         u64 expirations = 0;
         (void)::read(tfd.fd, &expirations, sizeof(expirations));
+        co_return stl::success;
     }
 
 } // namespace sap::async

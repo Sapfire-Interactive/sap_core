@@ -12,22 +12,11 @@
 #include "sap_core/stl/utility.h"
 #include "sap_core/types.h"
 
-#include <exception>
-
 namespace sap::async {
 
     class Executor;
 
     using ReactorErrorMessage = stl::fixed_string<127>;
-
-    class ReactorError : public std::exception {
-    public:
-        explicit ReactorError(ReactorErrorMessage msg) noexcept : m_msg(stl::move(msg)) {}
-        const char* what() const noexcept override { return m_msg.c_str(); }
-
-    private:
-        ReactorErrorMessage m_msg;
-    };
 
     // The awaiter's address is the reactor token, so the awaiter must live across
     // the suspend point — i.e. as a local in the coroutine body (coroutine frame
@@ -49,7 +38,7 @@ namespace sap::async {
 
         void await_suspend(stl::coroutine_handle<> h);
 
-        sap::io::Event await_resume();
+        stl::result<> await_resume();
 
     private:
         friend class Executor;
@@ -130,7 +119,7 @@ namespace sap::async {
             m_token._arm(&m_cb_node, &IoAwaiter::on_cancel, this);
     }
 
-    inline sap::io::Event IoAwaiter::await_resume() {
+    inline stl::result<> IoAwaiter::await_resume() {
         bool cancelled = m_cancelled || (m_token.stop_possible() && m_token.stop_requested());
         if (m_registered) {
             (void)m_ex.reactor().remove(m_handle);
@@ -138,10 +127,10 @@ namespace sap::async {
             --m_ex.m_pending_io;
         }
         if (!m_add_error.empty())
-            throw ReactorError(stl::move(m_add_error));
+            return stl::make_error<>("reactor: {}", m_add_error.c_str());
         if (cancelled)
-            throw CancelledError{};
-        return m_fired;
+            return stl::make_error<>("cancelled");
+        return stl::success;
     }
 
     inline void IoAwaiter::on_cancel(void* arg) noexcept {

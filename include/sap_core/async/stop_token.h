@@ -3,17 +3,10 @@
 #include "sap_core/stl/shared_ptr.h"
 #include "sap_core/stl/utility.h"
 
-#include <exception>
-
 namespace sap::async {
 
     class StopSource;
     class StopToken;
-
-    class CancelledError : public std::exception {
-    public:
-        const char* what() const noexcept override { return "operation cancelled"; }
-    };
 
     namespace detail {
 

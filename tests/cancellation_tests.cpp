@@ -9,7 +9,6 @@
 
 #include <chrono>
 
-using sap::async::CancelledError;
 using sap::async::Executor;
 using sap::async::sleep_for;
 using sap::async::spawn;
@@ -20,23 +19,27 @@ using sap::async::Task;
 
 namespace {
 
-    Task<void> cancel_after(Executor& ex, std::chrono::milliseconds dt, StopSource& src) {
-        co_await sleep_for(ex, dt);
+    Task<stl::result<>> cancel_after(Executor& ex, std::chrono::milliseconds dt, StopSource& src) {
+        if (auto r = co_await sleep_for(ex, dt); !r)
+            co_return r;
         src.request_stop();
+        co_return stl::success;
     }
 
-    Task<int> inner_cancellable(Executor& ex, StopToken tok) {
-        co_await sleep_for(ex, std::chrono::seconds(10), tok);
-        co_return 42;
+    Task<stl::result<int>> inner_cancellable(Executor& ex, StopToken tok) {
+        if (auto r = co_await sleep_for(ex, std::chrono::seconds(10), tok); !r)
+            co_return stl::make_error<int>("{}", r.error());
+        co_return stl::result<int>{stl::success, 42};
     }
 
-    Task<int> outer_cancellable(Executor& ex, StopToken tok) {
+    Task<stl::result<int>> outer_cancellable(Executor& ex, StopToken tok) {
         co_return co_await inner_cancellable(ex, stl::move(tok));
     }
 
-    Task<int> sleep_uncancellable(Executor& ex, std::chrono::milliseconds dt, int v) {
-        co_await sleep_for(ex, dt);
-        co_return v;
+    Task<stl::result<int>> sleep_uncancellable(Executor& ex, std::chrono::milliseconds dt, int v) {
+        if (auto r = co_await sleep_for(ex, dt); !r)
+            co_return stl::make_error<int>("{}", r.error());
+        co_return stl::result<int>{stl::success, v};
     }
 
 } // namespace
@@ -94,7 +97,7 @@ TEST(CancellationTest, StopCallback_DestructorUnlinksBeforeFire) {
     EXPECT_FALSE(fired);
 }
 
-TEST(CancellationTest, Cancellable_SleepFor_CancelledMidWait_ThrowsCancelled) {
+TEST(CancellationTest, Cancellable_SleepFor_CancelledMidWait_ReturnsError) {
     auto exr = Executor::create();
     auto& ex = exr.value();
     StopSource src;
@@ -103,11 +106,13 @@ TEST(CancellationTest, Cancellable_SleepFor_CancelledMidWait_ThrowsCancelled) {
     auto controller = spawn(ex, cancel_after(ex, std::chrono::milliseconds(30), src));
 
     auto start = std::chrono::steady_clock::now();
-    EXPECT_THROW(sync_wait(stl::move(h)), CancelledError);
+    auto r = sync_wait(stl::move(h));
     auto dt = std::chrono::steady_clock::now() - start;
+    EXPECT_FALSE(r);
     EXPECT_LT(dt, std::chrono::milliseconds(500));
 
-    sync_wait(stl::move(controller));
+    auto cr = sync_wait(stl::move(controller));
+    EXPECT_TRUE(cr) << (cr ? "" : cr.error().c_str());
 }
 
 TEST(CancellationTest, Cancellable_SleepFor_CancelAfterDone_NoEffect) {
@@ -116,7 +121,8 @@ TEST(CancellationTest, Cancellable_SleepFor_CancelAfterDone_NoEffect) {
     StopSource src;
 
     auto h = spawn(ex, sleep_for(ex, std::chrono::milliseconds(20), src.token()));
-    sync_wait(stl::move(h));
+    auto r = sync_wait(stl::move(h));
+    EXPECT_TRUE(r) << (r ? "" : r.error().c_str());
     EXPECT_TRUE(src.request_stop());
     EXPECT_TRUE(src.stop_requested());
 }
@@ -130,12 +136,14 @@ TEST(CancellationTest, NonCancellable_SleepFor_CancelHasNoEffect) {
     auto controller = spawn(ex, cancel_after(ex, std::chrono::milliseconds(10), src));
 
     auto start = std::chrono::steady_clock::now();
-    int  v     = sync_wait(stl::move(h));
-    auto dt    = std::chrono::steady_clock::now() - start;
-    EXPECT_EQ(v, 5);
+    auto r = sync_wait(stl::move(h));
+    auto dt = std::chrono::steady_clock::now() - start;
+    ASSERT_TRUE(r) << (r ? "" : r.error().c_str());
+    EXPECT_EQ(*r, 5);
     EXPECT_GE(dt, std::chrono::milliseconds(70));
 
-    sync_wait(stl::move(controller));
+    auto cr = sync_wait(stl::move(controller));
+    EXPECT_TRUE(cr) << (cr ? "" : cr.error().c_str());
 }
 
 TEST(CancellationTest, Cancellable_NestedTasks_PropagatesUp) {
@@ -146,6 +154,8 @@ TEST(CancellationTest, Cancellable_NestedTasks_PropagatesUp) {
     auto h          = spawn(ex, outer_cancellable(ex, src.token()));
     auto controller = spawn(ex, cancel_after(ex, std::chrono::milliseconds(20), src));
 
-    EXPECT_THROW(sync_wait(stl::move(h)), CancelledError);
-    sync_wait(stl::move(controller));
+    auto r = sync_wait(stl::move(h));
+    EXPECT_FALSE(r);
+    auto cr = sync_wait(stl::move(controller));
+    EXPECT_TRUE(cr) << (cr ? "" : cr.error().c_str());
 }
