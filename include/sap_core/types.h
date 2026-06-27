@@ -29,6 +29,12 @@ using i64 = std::int64_t;
 using f32 = float;
 using f64 = double;
 
+using uptr = std::uintptr_t;
+using iptr = std::intptr_t;
+using umax = std::uintmax_t;
+using imax = std::intmax_t;
+using ssize = std::ptrdiff_t;
+
 namespace stl {
 
     constexpr inline u64 gibibytes(u32 amount) { return static_cast<u64>(amount) * 1024ULL * 1024ULL * 1024ULL; }

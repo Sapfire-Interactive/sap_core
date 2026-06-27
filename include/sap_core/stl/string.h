@@ -93,6 +93,13 @@ namespace stl {
 
     using string = basic_string<>;
 
+    using std::stof;
+    using std::stoi;
+    using std::stol;
+    using std::stoul;
+    using std::stoull;
+    using std::to_string;
+
 } // namespace stl
 
 template <class Allocator>
