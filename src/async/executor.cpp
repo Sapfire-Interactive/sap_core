@@ -21,20 +21,23 @@ namespace sap::async {
 
     void Executor::schedule(stl::coroutine_handle<> h) { m_ready.push_back(h); }
 
-    void Executor::stop() { m_running = false; }
+    void Executor::stop() noexcept {
+        m_running.store(false, stl::memory_order_release);
+        m_reactor.wake();
+    }
 
     void Executor::run() { run_until({}); }
 
     void Executor::run_until(stl::coroutine_handle<> target) {
-        m_running = true;
+        m_running.store(true, stl::memory_order_release);
 
         sap::io::Trigger triggers[sap::io::Reactor::MAX_EVENTS_PER_WAIT];
 
-        while (m_running) {
+        while (m_running.load(stl::memory_order_acquire)) {
             if (target && target.done())
                 return;
 
-            while (!m_ready.empty() && m_running) {
+            while (!m_ready.empty() && m_running.load(stl::memory_order_acquire)) {
                 auto h = m_ready.front();
                 m_ready.pop_front();
                 h.resume();
@@ -42,7 +45,7 @@ namespace sap::async {
                     return;
             }
 
-            if (!m_running)
+            if (!m_running.load(stl::memory_order_acquire))
                 break;
             if (m_pending_io == 0 && m_ready.empty())
                 break;
@@ -50,7 +53,7 @@ namespace sap::async {
             auto n = m_reactor.wait(stl::span<sap::io::Trigger>(triggers, sap::io::Reactor::MAX_EVENTS_PER_WAIT),
                                     std::chrono::milliseconds(-1));
             if (!n) {
-                m_running = false;
+                m_running.store(false, stl::memory_order_release);
                 break;
             }
 

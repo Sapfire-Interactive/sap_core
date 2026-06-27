@@ -161,6 +161,12 @@ namespace sap::async {
     T sync_wait(SpawnHandle<T>&& handle) {
         if (!handle.done())
             handle.executor()->run_until(handle.handle());
+        if (!handle.done()) {
+            if constexpr (!std::is_void_v<T>)
+                return T{};
+            else
+                return;
+        }
         auto& p = handle.handle().promise();
         if (p.exc)
             stl::rethrow_exception(p.exc);

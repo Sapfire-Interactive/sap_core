@@ -71,8 +71,21 @@ namespace sap::async {
         // Movable, but only safe before any IoAwaiter is in flight — awaiters
         // hold Executor& references that would dangle across a move. Same
         // contract as TCPSocketAsync ("must outlive in-flight I/O").
-        Executor(Executor&&) noexcept                 = default;
-        Executor& operator=(Executor&&) noexcept      = default;
+        Executor(Executor&& other) noexcept :
+            m_reactor(stl::move(other.m_reactor)),
+            m_ready(stl::move(other.m_ready)),
+            m_pending_io(other.m_pending_io),
+            m_running(other.m_running.load(stl::memory_order_acquire)) {}
+
+        Executor& operator=(Executor&& other) noexcept {
+            if (this != &other) {
+                m_reactor    = stl::move(other.m_reactor);
+                m_ready      = stl::move(other.m_ready);
+                m_pending_io = other.m_pending_io;
+                m_running.store(other.m_running.load(stl::memory_order_acquire), stl::memory_order_release);
+            }
+            return *this;
+        }
 
         sap::io::Reactor& reactor() noexcept { return m_reactor; }
 
@@ -85,7 +98,8 @@ namespace sap::async {
         // Non-reentrant: do not call from a coroutine the executor is resuming.
         void run_until(stl::coroutine_handle<> target);
 
-        void stop();
+        // Thread-safe; signals the loop to exit and wakes any blocked epoll_wait.
+        void stop() noexcept;
 
         template <typename T>
         void spawn_detach(Task<T> task) {
@@ -100,7 +114,7 @@ namespace sap::async {
         sap::io::Reactor                    m_reactor;
         stl::deque<stl::coroutine_handle<>> m_ready;
         stl::size_t                         m_pending_io = 0;
-        bool                                m_running    = false;
+        stl::atomic<bool>                   m_running{false};
     };
 
     inline void IoAwaiter::await_suspend(stl::coroutine_handle<> h) {
