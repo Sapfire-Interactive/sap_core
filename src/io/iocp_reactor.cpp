@@ -15,6 +15,7 @@
 
 #include "sap_core/stl/result.h"
 #include "sap_core/stl/unique_ptr.h"
+#include "sap_core/stl/utility.h"
 #include "sap_core/types.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -22,10 +23,10 @@
 #endif
 
 #include <winsock2.h>
+#include <mswsock.h> // SIO_BASE_HANDLE
 #include <windows.h>
 
 #include <cstring>
-#include <utility>
 
 namespace sap::io {
 
@@ -72,22 +73,32 @@ namespace sap::io {
                                                      ULONG);
         using NtCancelIoFileEx_t      = LONG(NTAPI*)(HANDLE, IoStatusBlock*, IoStatusBlock*);
 
-        NtDeviceIoControlFile_t g_nt_device_io_control_file = nullptr;
-        NtCancelIoFileEx_t      g_nt_cancel_io_file_ex      = nullptr;
+        // ntdll exports are process-wide and identical for every reactor, so they
+        // are resolved once into this immutable cache. The function-local static
+        // makes init thread-safe under concurrent Reactor::create() calls.
+        struct NtAfd {
+            NtDeviceIoControlFile_t device_io_control = nullptr;
+            NtCancelIoFileEx_t      cancel_io_file_ex = nullptr;
 
-        void load_ntdll() {
-            if (g_nt_device_io_control_file)
-                return;
-            HMODULE ntdll = ::GetModuleHandleA("ntdll.dll");
-            if (!ntdll)
-                return;
-            g_nt_device_io_control_file = reinterpret_cast<NtDeviceIoControlFile_t>(::GetProcAddress(ntdll, "NtDeviceIoControlFile"));
-            g_nt_cancel_io_file_ex      = reinterpret_cast<NtCancelIoFileEx_t>(::GetProcAddress(ntdll, "NtCancelIoFileEx"));
+            NtAfd() {
+                if (HMODULE ntdll = ::GetModuleHandleW(L"ntdll.dll")) {
+                    device_io_control = reinterpret_cast<NtDeviceIoControlFile_t>(::GetProcAddress(ntdll, "NtDeviceIoControlFile"));
+                    cancel_io_file_ex = reinterpret_cast<NtCancelIoFileEx_t>(::GetProcAddress(ntdll, "NtCancelIoFileEx"));
+                }
+            }
+        };
+
+        const NtAfd& nt_afd() {
+            static const NtAfd fns;
+            return fns;
         }
 
         // ---- Sentinel completion key used by wake() ------------------------
 
         constexpr ULONG_PTR WAKE_KEY = static_cast<ULONG_PTR>(-1);
+
+        // NTSTATUS reported by a completion produced by cancelling its request.
+        constexpr LONG kStatusCancelled = static_cast<LONG>(0xC0000120L);
 
         // ---- Event flag conversion -----------------------------------------
 
@@ -132,8 +143,8 @@ namespace sap::io {
 
     } // namespace
 
-    // Per-fd state. Lives until remove() or Reactor destruction. The
-    // OVERLAPPED + AfdPollInfo must outlive each in-flight kernel request.
+    // Freed only in ~Reactor: the IOCP association is permanent and completions
+    // reference this by pointer. active = registered; pending = poll in flight.
     struct Reactor::AfdPollContext {
         OVERLAPPED   overlapped{};
         AfdPollInfo  in_buf{};
@@ -142,60 +153,49 @@ namespace sap::io {
         NativeHandle socket_handle = INVALID_NATIVE_HANDLE;
         HANDLE       base_handle   = nullptr;
         Event        interest      = Event::None;
+        bool         active        = false;
         bool         pending       = false;
     };
 
-    namespace {
+    stl::result<> Reactor::submit_poll(AfdPollContext& ctx) {
+        std::memset(&ctx.overlapped, 0, sizeof(ctx.overlapped));
+        ctx.in_buf.Timeout.QuadPart    = INT64_MIN; // infinite (until event)
+        ctx.in_buf.NumberOfHandles     = 1;
+        ctx.in_buf.Exclusive           = 0;
+        ctx.in_buf.Handles[0].Handle   = ctx.base_handle;
+        ctx.in_buf.Handles[0].Events   = to_afd(ctx.interest);
+        ctx.in_buf.Handles[0].Status   = 0;
 
-        // Submit an AFD poll for this context's current interest. If a previous
-        // request is in flight, the caller must cancel it first.
-        stl::result<> submit_poll(HANDLE iocp, Reactor::AfdPollContext& ctx) {
-            (void)iocp; // ctx.base_handle is already associated with the IOCP
+        // overlapped.Internal/InternalHigh alias the IO_STATUS_BLOCK fields.
+        auto* iosb = reinterpret_cast<IoStatusBlock*>(&ctx.overlapped.Internal);
 
-            std::memset(&ctx.overlapped, 0, sizeof(ctx.overlapped));
-            ctx.in_buf.Timeout.QuadPart    = INT64_MIN; // infinite (until event)
-            ctx.in_buf.NumberOfHandles     = 1;
-            ctx.in_buf.Exclusive           = 0;
-            ctx.in_buf.Handles[0].Handle   = ctx.base_handle;
-            ctx.in_buf.Handles[0].Events   = to_afd(ctx.interest);
-            ctx.in_buf.Handles[0].Status   = 0;
+        LONG status = nt_afd().device_io_control(ctx.base_handle, nullptr, nullptr, &ctx.overlapped, iosb, kIoctlAfdPoll,
+                                                 &ctx.in_buf, sizeof(ctx.in_buf), &ctx.out_buf, sizeof(ctx.out_buf));
 
-            auto* iosb = reinterpret_cast<IoStatusBlock*>(&ctx.overlapped.Internal);
-            // overlapped.Internal/InternalHigh are aliased with NTSTATUS/Information.
-            // We pass the OVERLAPPED's first two fields as the IO_STATUS_BLOCK.
+        // STATUS_PENDING (0x103) is success-but-async; anything else nonzero fails.
+        if (status != 0 && status != 0x00000103L)
+            return stl::make_error<>("NtDeviceIoControlFile(IOCTL_AFD_POLL) failed: 0x{:x}", static_cast<u32>(status));
 
-            LONG status = g_nt_device_io_control_file(ctx.base_handle, nullptr, nullptr, &ctx.overlapped, iosb, kIoctlAfdPoll,
-                                                      &ctx.in_buf, sizeof(ctx.in_buf), &ctx.out_buf, sizeof(ctx.out_buf));
+        ctx.pending = true;
+        return stl::result_success();
+    }
 
-            // STATUS_PENDING (0x103) is success-but-async; anything below 0 is failure.
-            if (status != 0 && status != 0x00000103L)
-                return stl::make_error<>("NtDeviceIoControlFile(IOCTL_AFD_POLL) failed: 0x{:x}", static_cast<u32>(status));
-
-            ctx.pending = true;
-            return stl::result_success();
+    // Request cancellation; pending stays set until the completion is drained.
+    void Reactor::cancel_poll(AfdPollContext& ctx) noexcept {
+        if (!ctx.pending)
+            return;
+        if (nt_afd().cancel_io_file_ex) {
+            IoStatusBlock iosb_in{};
+            IoStatusBlock iosb_out{};
+            iosb_in.Pointer = &ctx.overlapped;
+            (void)nt_afd().cancel_io_file_ex(ctx.base_handle, &iosb_in, &iosb_out);
+        } else {
+            (void)::CancelIoEx(ctx.base_handle, &ctx.overlapped);
         }
-
-        void cancel_poll(Reactor::AfdPollContext& ctx) {
-            if (!ctx.pending)
-                return;
-            if (g_nt_cancel_io_file_ex) {
-                IoStatusBlock iosb_in{};
-                IoStatusBlock iosb_out{};
-                iosb_in.Pointer = &ctx.overlapped;
-                (void)g_nt_cancel_io_file_ex(ctx.base_handle, &iosb_in, &iosb_out);
-            } else {
-                (void)::CancelIoEx(ctx.base_handle, &ctx.overlapped);
-            }
-            ctx.pending = false;
-            // Note: the cancellation completion may still arrive on the IOCP;
-            // wait() filters by ctx.pending to ignore stale completions.
-        }
-
-    } // namespace
+    }
 
     stl::result<Reactor> Reactor::create() {
-        load_ntdll();
-        if (!g_nt_device_io_control_file)
+        if (!nt_afd().device_io_control)
             return stl::make_error<Reactor>("NtDeviceIoControlFile not found in ntdll");
 
         HANDLE iocp = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
@@ -204,80 +204,136 @@ namespace sap::io {
 
         Reactor r;
         r.m_iocp = iocp;
-        return stl::result<Reactor>(stl::success, std::move(r));
+        return stl::result<Reactor>(stl::success, stl::move(r));
     }
 
     Reactor::~Reactor() {
-        // Cancel any in-flight polls before tearing down the contexts.
-        for (auto& kv : m_contexts) {
-            if (kv.second)
-                cancel_poll(*kv.second);
+        if (!m_iocp) {
+            m_contexts.clear();
+            return;
         }
+        // Stop watching everything, then drain in-flight completions so the kernel
+        // is finished with every OVERLAPPED before the contexts are freed.
+        for (auto& kv : m_contexts) {
+            kv.second->active = false;
+            cancel_poll(*kv.second);
+        }
+        for (;;) {
+            bool any_pending = false;
+            for (auto& kv : m_contexts)
+                if (kv.second->pending) {
+                    any_pending = true;
+                    break;
+                }
+            if (!any_pending)
+                break;
+
+            OVERLAPPED_ENTRY entries[MAX_EVENTS_PER_WAIT];
+            ULONG            removed = 0;
+            if (!::GetQueuedCompletionStatusEx(m_iocp, entries, MAX_EVENTS_PER_WAIT, &removed, 1000, FALSE))
+                break; // timeout/error: stop rather than hang teardown
+            for (ULONG i = 0; i < removed; ++i)
+                if (entries[i].lpCompletionKey != WAKE_KEY)
+                    reinterpret_cast<AfdPollContext*>(entries[i].lpCompletionKey)->pending = false;
+        }
+
+        ::CloseHandle(m_iocp);
+        m_iocp = nullptr;
+        for (auto& kv : m_contexts)
+            delete kv.second;
         m_contexts.clear();
-        if (m_iocp)
-            ::CloseHandle(m_iocp);
     }
 
-    Reactor::Reactor(Reactor&& o) noexcept : m_iocp(o.m_iocp), m_contexts(std::move(o.m_contexts)) { o.m_iocp = nullptr; }
+    Reactor::Reactor(Reactor&& o) noexcept : m_iocp(o.m_iocp), m_contexts(stl::move(o.m_contexts)) { o.m_iocp = nullptr; }
 
     Reactor& Reactor::operator=(Reactor&& o) noexcept {
         if (this != &o) {
-            for (auto& kv : m_contexts) {
-                if (kv.second)
-                    cancel_poll(*kv.second);
-            }
-            m_contexts.clear();
-            if (m_iocp)
-                ::CloseHandle(m_iocp);
-            m_iocp       = o.m_iocp;
-            m_contexts   = std::move(o.m_contexts);
-            o.m_iocp     = nullptr;
+            // tmp adopts o's resources, then takes ours and tears them down on exit.
+            Reactor tmp(stl::move(o));
+            void* iocp_tmp = m_iocp;
+            m_iocp         = tmp.m_iocp;
+            tmp.m_iocp     = iocp_tmp;
+            m_contexts.swap(tmp.m_contexts);
         }
         return *this;
     }
 
     stl::result<> Reactor::add(NativeHandle handle, Event interest, u64 token) {
-        if (m_contexts.find(handle) != m_contexts.end())
-            return stl::make_error<>("Reactor::add: handle already registered");
+        if (auto it = m_contexts.find(handle); it != m_contexts.end()) {
+            AfdPollContext& ctx = *it->second;
+            if (ctx.active)
+                return stl::make_error<>("Reactor::add: handle already registered");
 
-        auto ctx              = stl::make_unique<AfdPollContext>();
-        ctx->socket_handle    = handle;
-        ctx->user_token       = token;
-        ctx->interest         = interest;
-        ctx->base_handle      = resolve_base_handle(static_cast<SOCKET>(handle));
+            // A prior remove() may have left a cancellation in flight; drain it
+            // (requeuing other sockets' events) before reusing the OVERLAPPED.
+            while (ctx.pending) {
+                OVERLAPPED_ENTRY entries[MAX_EVENTS_PER_WAIT];
+                ULONG            removed = 0;
+                if (!::GetQueuedCompletionStatusEx(m_iocp, entries, MAX_EVENTS_PER_WAIT, &removed, 1000, FALSE))
+                    break;
+                for (ULONG i = 0; i < removed; ++i) {
+                    if (entries[i].lpCompletionKey == WAKE_KEY)
+                        continue;
+                    auto* c = reinterpret_cast<AfdPollContext*>(entries[i].lpCompletionKey);
+                    if (c == &ctx || !c->active)
+                        c->pending = false;
+                    else
+                        ::PostQueuedCompletionStatus(m_iocp, entries[i].dwNumberOfBytesTransferred, entries[i].lpCompletionKey,
+                                                     entries[i].lpOverlapped);
+                }
+            }
+
+            HANDLE base = resolve_base_handle(static_cast<SOCKET>(handle));
+            if (!base)
+                return stl::make_error<>("Reactor::add: WSAIoctl(SIO_BASE_HANDLE) failed: {}", ::WSAGetLastError());
+            ctx.base_handle = base;
+            // Re-associate in case the handle value was recycled for a new socket;
+            // ERROR_INVALID_PARAMETER means it's the same, still-associated socket.
+            if (!::CreateIoCompletionPort(base, m_iocp, reinterpret_cast<ULONG_PTR>(&ctx), 0)) {
+                if (DWORD err = ::GetLastError(); err != ERROR_INVALID_PARAMETER)
+                    return stl::make_error<>("CreateIoCompletionPort(associate) failed: {}", err);
+            }
+            ctx.interest   = interest;
+            ctx.user_token = token;
+            ctx.active     = true;
+            return submit_poll(ctx);
+        }
+
+        auto ctx           = stl::make_unique<AfdPollContext>();
+        ctx->socket_handle = handle;
+        ctx->user_token    = token;
+        ctx->interest      = interest;
+        ctx->base_handle   = resolve_base_handle(static_cast<SOCKET>(handle));
         if (!ctx->base_handle)
             return stl::make_error<>("Reactor::add: WSAIoctl(SIO_BASE_HANDLE) failed: {}", ::WSAGetLastError());
 
-        // Associate the base handle with the IOCP. The completion key carries
-        // the per-fd context pointer so wait() can recover it.
+        // Associate once; the completion key is the context pointer. Permanent.
         if (!::CreateIoCompletionPort(ctx->base_handle, m_iocp, reinterpret_cast<ULONG_PTR>(ctx.get()), 0))
             return stl::make_error<>("CreateIoCompletionPort(associate) failed: {}", ::GetLastError());
 
-        auto submit = submit_poll(m_iocp, *ctx);
-        if (!submit)
-            return submit;
-
-        m_contexts.emplace(handle, std::move(ctx));
+        AfdPollContext* raw = ctx.get();
+        raw->active         = true;
+        m_contexts.emplace(handle, ctx.release());
+        if (auto r = submit_poll(*raw); !r) {
+            raw->active = false; // keep the associated context for reuse
+            return r;
+        }
         return stl::result_success();
     }
 
     stl::result<> Reactor::modify(NativeHandle handle, Event interest, u64 token) {
-        auto it = m_contexts.find(handle);
-        if (it == m_contexts.end())
-            return stl::make_error<>("Reactor::modify: handle not registered");
-        auto& ctx       = *it->second;
-        cancel_poll(ctx);
-        ctx.interest    = interest;
-        ctx.user_token  = token;
-        return submit_poll(m_iocp, ctx);
+        if (auto r = remove(handle); !r)
+            return r;
+        return add(handle, interest, token);
     }
 
     stl::result<> Reactor::remove(NativeHandle handle) {
         auto it = m_contexts.find(handle);
         if (it == m_contexts.end())
             return stl::make_error<>("Reactor::remove: handle not registered");
-        cancel_poll(*it->second);
-        m_contexts.erase(it);
+        AfdPollContext& ctx = *it->second;
+        ctx.active          = false;
+        cancel_poll(ctx); // context kept; freed only in ~Reactor
         return stl::result_success();
     }
 
@@ -306,17 +362,18 @@ namespace sap::io {
 
             auto* ctx = reinterpret_cast<AfdPollContext*>(entries[i].lpCompletionKey);
             if (!ctx || !ctx->pending)
-                continue; // stale completion from a cancelled request
-
+                continue; // no poll was outstanding
             ctx->pending = false;
-            ULONG fired  = (ctx->out_buf.NumberOfHandles >= 1) ? ctx->out_buf.Handles[0].Events : 0;
+            if (!ctx->active)
+                continue; // removed between submit and completion
+            const LONG status = static_cast<LONG>(ctx->overlapped.Internal);
+            if (status == kStatusCancelled)
+                continue; // a cancellation we requested
 
-            out[written].events     = from_afd(fired);
+            ULONG fired             = (ctx->out_buf.NumberOfHandles >= 1) ? ctx->out_buf.Handles[0].Events : 0;
+            out[written].events     = (status == 0) ? from_afd(fired) : Event::Error;
             out[written].user_token = ctx->user_token;
             ++written;
-
-            // AFD_POLL is one-shot; resubmit so we stay registered.
-            (void)submit_poll(m_iocp, *ctx);
         }
         return stl::result<stl::size_t>(stl::success, written);
     }

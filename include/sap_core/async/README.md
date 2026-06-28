@@ -245,8 +245,8 @@ coroutine locals are pinned in the heap-allocated frame.
 
 ## `sleep_for`
 
-Cancellable delay backed by `timerfd` on Linux. Windows is currently a
-stub that returns immediately.
+Cancellable delay backed by `timerfd` on Linux. On Windows it waits on a
+loopback socket that a threadpool timer signals when the delay elapses.
 
 ```cpp
 co_await sleep_for(ex, 100ms);            // uncancellable
@@ -608,7 +608,7 @@ resuming. The executor is not re-entrant. From inside a coroutine,
 | `when_all`                              | Shipped (sequential; concurrent rewrite later).             |
 | `Executor`, `IoAwaiter`                 | Linux: shipped. Windows: depends on the IOCP reactor, which is implemented but unverified. |
 | `Executor::run_until`                   | Shipped.                                                    |
-| `sleep_for`                             | Linux: shipped. Windows: stub that returns immediately.     |
+| `sleep_for`                             | Linux: shipped. Windows: loopback socket + threadpool timer. |
 | `spawn`, `SpawnHandle`                  | Shipped.                                                    |
 | `sync_wait(SpawnHandle<T>&&)`           | Shipped.                                                    |
 | `StopSource`, `StopToken`, `CancelledError` | Shipped.                                                |

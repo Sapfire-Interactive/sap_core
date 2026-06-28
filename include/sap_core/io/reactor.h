@@ -4,7 +4,6 @@
 #include "sap_core/platform.h"
 #include "sap_core/stl/result.h"
 #include "sap_core/stl/span.h"
-#include "sap_core/stl/unique_ptr.h"
 #include "sap_core/stl/unordered_map.h"
 #include "sap_core/types.h"
 
@@ -59,11 +58,14 @@ namespace sap::io {
         int m_epoll_fd = -1;
         int m_wake_fd  = -1;
 #elif defined(_WIN32)
+        // Raw pointers, not unique_ptr: an incomplete value type would force the
+        // map's destructor on every includer. Owned by the out-of-line members.
         struct AfdPollContext;
-        // IOCP holds completions; per-fd contexts hold the OVERLAPPED + AFD
-        // poll request that the kernel writes into across the syscall.
         void* m_iocp = nullptr; // HANDLE
-        stl::unordered_map<NativeHandle, stl::unique_ptr<AfdPollContext>> m_contexts;
+        stl::unordered_map<NativeHandle, AfdPollContext*> m_contexts;
+
+        static stl::result<> submit_poll(AfdPollContext& ctx);
+        static void          cancel_poll(AfdPollContext& ctx) noexcept;
 #else
 #error "sap::io::Reactor only supports Linux and Windows"
 #endif
