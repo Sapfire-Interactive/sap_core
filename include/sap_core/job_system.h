@@ -36,11 +36,11 @@ namespace sap {
 
         void worker_main(u32 index, std::stop_token stop);
 
-        stl::vector<stl::unique_ptr<job_queue>> m_queues;
+        stl::vector<stl::unique_ptr<job_queue>, std::allocator<stl::unique_ptr<job_queue>>> m_queues;
         stl::atomic<u32> m_next_queue{0};
         stl::atomic<u32> m_pending_jobs{0};
         // Must be last: destroyed first so workers join before queues/atomics are torn down.
-        stl::vector<stl::jthread> m_threads;
+        stl::vector<stl::jthread, std::allocator<stl::jthread>> m_threads;
     };
 
 } // namespace sap

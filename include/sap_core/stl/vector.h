@@ -4,9 +4,18 @@
 #include <memory>
 #include <vector>
 
+// Optional project allocator policy. Without these definitions, the public
+// API and allocator remain exactly the original std::allocator configuration.
+#ifdef SAP_CORE_VECTOR_ALLOCATOR_HEADER
+#include SAP_CORE_VECTOR_ALLOCATOR_HEADER
+#endif
+#ifndef SAP_CORE_VECTOR_DEFAULT_ALLOCATOR
+#define SAP_CORE_VECTOR_DEFAULT_ALLOCATOR std::allocator
+#endif
+
 namespace stl {
 
-    template <class T, class Allocator = std::allocator<T>>
+    template <class T, class Allocator = SAP_CORE_VECTOR_DEFAULT_ALLOCATOR<T>>
     class vector : public std::vector<T, Allocator> {
     public:
         using base_type = std::vector<T, Allocator>;
@@ -16,6 +25,10 @@ namespace stl {
         vector()
             requires std::is_default_constructible_v<Allocator>
             : base_type() {}
+
+        vector()
+            requires (!std::is_default_constructible_v<Allocator>)
+            = delete;
 
         // Construct with allocator
         explicit vector(const Allocator& alloc) : base_type(alloc) {}

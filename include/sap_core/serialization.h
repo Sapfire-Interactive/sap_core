@@ -17,13 +17,13 @@ namespace sap {
         stl::result<> write_f64(f64 val);
         stl::result<> write_string(stl::string_view str);
         stl::result<> write_bytes(stl::span<const stl::byte> data);
-        inline const stl::vector<stl::byte>& buffer() const { return m_buffer; }
+        inline const stl::vector<stl::byte, std::allocator<stl::byte>>& buffer() const { return m_buffer; }
 
     private:
         void append_bytes(const void* data, size_t len);
 
     private:
-        stl::vector<stl::byte> m_buffer;
+        stl::vector<stl::byte, std::allocator<stl::byte>> m_buffer;
     };
 
     class SAP_CORE_API ByteReader {

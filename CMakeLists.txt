@@ -107,6 +107,7 @@ if(SAP_CORE_BUILD_TESTS)
     add_executable(sap_core_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/arena_tests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/allocator_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/allocator_legacy_tests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/stack_allocator_tests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/result_tests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixed_string_tests.cpp
