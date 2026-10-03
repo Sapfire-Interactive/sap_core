@@ -9,6 +9,7 @@
 // Existing projects retain their allocator, constructors and serialization API.
 static_assert(std::is_same_v<stl::vector<u32>::allocator_type, std::allocator<u32>>);
 static_assert(std::is_default_constructible_v<stl::vector<u32>>);
+static_assert(std::is_same_v<decltype(std::declval<stl::vector<u32>&>().reserve(1024)), void>);
 static_assert(std::is_same_v<decltype(sap::ByteWriter{}.buffer()), const stl::vector<stl::byte>&>);
 
 TEST(AllocatorLegacy, DefaultConstructorsKeepOrdinaryAllocator) {

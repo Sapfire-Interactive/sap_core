@@ -1,4 +1,5 @@
 #pragma once
+#include <sap_core/stl/default_allocator.h>
 
 #include <cassert>
 #include <functional>
@@ -21,11 +22,16 @@ namespace stl {
     };
 
     template <class K, class V, class Hash = std::hash<K>, class KeyEqual = std::equal_to<K>,
-              class Allocator = std::allocator<std::pair<const K, V>>>
+              class Allocator = SAP_CORE_DEFAULT_ALLOCATOR<std::pair<const K, V>>>
     class unordered_map : public std::unordered_map<K, V, Hash, KeyEqual, Allocator> {
     public:
         using base_type = std::unordered_map<K, V, Hash, KeyEqual, Allocator>;
         using allocator_type = Allocator;
+
+        template <class Tag>
+            requires(std::is_enum_v<Tag> && std::is_constructible_v<Allocator, Tag>)
+        explicit unordered_map(Tag tag) : base_type(0, Hash{}, KeyEqual{}, Allocator(tag)) {}
+
 
         unordered_map()
             requires std::is_default_constructible_v<Allocator>
@@ -56,11 +62,11 @@ namespace stl {
     };
 
     // Convenience alias for string-keyed unordered_maps with transparent lookup
-    template <class V, class Allocator = std::allocator<std::pair<const std::string, V>>>
+    template <class V, class Allocator = SAP_CORE_DEFAULT_ALLOCATOR<std::pair<const std::string, V>>>
     using string_unordered_map = unordered_map<std::string, V, string_hash, string_equal, Allocator>;
 
     template <class K, class V, class Hash = std::hash<K>, class KeyEqual = std::equal_to<K>,
-              class Allocator = std::allocator<std::pair<const K, V>>>
+              class Allocator = SAP_CORE_DEFAULT_ALLOCATOR<std::pair<const K, V>>>
     [[nodiscard]] inline unordered_map<K, V, Hash, KeyEqual, Allocator> make_unordered_map(const Allocator& alloc) {
         return unordered_map<K, V, Hash, KeyEqual, Allocator>(alloc);
     }

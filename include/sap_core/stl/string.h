@@ -1,4 +1,5 @@
 #pragma once
+#include <sap_core/stl/default_allocator.h>
 
 #include <cassert>
 #include <format>
@@ -8,11 +9,16 @@
 
 namespace stl {
 
-    template <class Allocator = std::allocator<char>>
+    template <class Allocator = SAP_CORE_DEFAULT_ALLOCATOR<char>>
     class basic_string : public std::basic_string<char, std::char_traits<char>, Allocator> {
     public:
         using base_type = std::basic_string<char, std::char_traits<char>, Allocator>;
         using allocator_type = Allocator;
+
+        template <class Tag>
+            requires(std::is_enum_v<Tag> && std::is_constructible_v<Allocator, Tag>)
+        explicit basic_string(Tag tag) : base_type(Allocator(tag)) {}
+
 
         // Default constructor (requires default-constructible allocator)
         basic_string()
@@ -70,6 +76,9 @@ namespace stl {
             base_type::operator=(str.c_str());
             return *this;
         }
+
+        basic_string(std::initializer_list<char> text, const Allocator& alloc) : base_type(text, alloc) {}
+        basic_string(std::initializer_list<char> text) requires std::is_default_constructible_v<Allocator> : base_type(text) {}
 
         // Inherit remaining constructors
         using base_type::base_type;

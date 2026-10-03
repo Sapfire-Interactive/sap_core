@@ -62,7 +62,8 @@ namespace sap::io {
         // map's destructor on every includer. Owned by the out-of-line members.
         struct AfdPollContext;
         void* m_iocp = nullptr; // HANDLE
-        stl::unordered_map<NativeHandle, AfdPollContext*> m_contexts;
+        stl::unordered_map<NativeHandle, AfdPollContext*, std::hash<NativeHandle>, std::equal_to<NativeHandle>,
+                           std::allocator<std::pair<const NativeHandle, AfdPollContext*>>> m_contexts;
 
         static stl::result<> submit_poll(AfdPollContext& ctx);
         static void          cancel_poll(AfdPollContext& ctx) noexcept;

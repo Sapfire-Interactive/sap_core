@@ -1,4 +1,5 @@
 #pragma once
+#include <sap_core/stl/default_allocator.h>
 
 #include <cassert>
 #include <functional>
@@ -7,11 +8,16 @@
 
 namespace stl {
 
-    template <class Key, class T, class Compare = std::less<Key>, class Allocator = std::allocator<std::pair<const Key, T>>>
+    template <class Key, class T, class Compare = std::less<Key>, class Allocator = SAP_CORE_DEFAULT_ALLOCATOR<std::pair<const Key, T>>>
     class map : public std::map<Key, T, Compare, Allocator> {
     public:
         using base_type = std::map<Key, T, Compare, Allocator>;
         using allocator_type = Allocator;
+
+        template <class Tag>
+            requires(std::is_enum_v<Tag> && std::is_constructible_v<Allocator, Tag>)
+        explicit map(Tag tag) : base_type(Allocator(tag)) {}
+
 
         map()
             requires std::is_default_constructible_v<Allocator>
@@ -42,7 +48,7 @@ namespace stl {
         using base_type::base_type;
     };
 
-    template <class Key, class T, class Compare = std::less<Key>, class Allocator = std::allocator<std::pair<const Key, T>>>
+    template <class Key, class T, class Compare = std::less<Key>, class Allocator = SAP_CORE_DEFAULT_ALLOCATOR<std::pair<const Key, T>>>
     [[nodiscard]] inline map<Key, T, Compare, Allocator> make_map(const Allocator& alloc) {
         return map<Key, T, Compare, Allocator>(alloc);
     }
