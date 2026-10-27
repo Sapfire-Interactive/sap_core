@@ -9,4 +9,5 @@ namespace stl {
     using std::getenv;
     using std::strtol;
     using std::strtoul;
+    using std::system;
 } // namespace stl
