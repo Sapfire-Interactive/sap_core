@@ -16,6 +16,7 @@ namespace stl {
         }
     };
 
+    // @TODO: Make unique_ptr's allocator configurable like vector
     // unique_ptr with arena-aware deleter (destructor-only, no deallocation)
     template <typename T>
     using arena_unique_ptr = std::unique_ptr<T, arena_deleter<T>>;
